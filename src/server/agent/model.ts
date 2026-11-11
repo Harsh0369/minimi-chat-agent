@@ -38,10 +38,10 @@ export async function generate(
                 description:
                   'Search the current public web when a question needs fresh or verifiable external facts. Search only public information.',
                 parameters: {
-                  type: 'OBJECT',
+                  type: 'object',
                   properties: {
                     query: {
-                      type: 'STRING',
+                      type: 'string',
                       description: 'A focused search query, maximum 250 characters',
                     },
                   },

@@ -67,6 +67,9 @@ describe('agent execution', () => {
           }>;
         };
         expect(body.tools[0]?.functionDeclarations[0]?.name).toBe('web_search');
+        expect(body.tools[0]?.functionDeclarations[0]).toMatchObject({
+          parameters: { type: 'object', properties: { query: { type: 'string' } } },
+        });
         if (modelCalls === 2) {
           expect(body.contents[1]?.parts[0]?.thoughtSignature).toBe('opaque-signature');
           expect(body.contents[2]?.parts[0]?.functionResponse?.id).toBe('call-1');
