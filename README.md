@@ -42,8 +42,8 @@ To run the same browser tests against the production build in PowerShell, set `$
 ## Development boundaries
 
 - `src/shared` contains browser-safe schemas; it must never import server configuration.
-- `src/server` owns configuration, HTTP lifecycle and security. Future modules own persistence, retrieval, providers and orchestration behind explicit interfaces.
-- `src/client` renders the application and validates API responses.
+- `src/server` owns Express routes, configuration, HTTP lifecycle and security. Express starts with `app.listen`; Vite attaches to its development server for browser refresh. Future modules own persistence, retrieval, providers and orchestration behind explicit interfaces.
+- `src/client/App.tsx` composes the page. `src/client/components` owns display sections, and `src/client/hooks` owns status fetching and retry. The hook validates API responses against the shared contract.
 - Local developer MCPs and Graft are not application dependencies or runtime tools.
 - Supported use is one local process. Public hosting/authentication is outside this foundation.
 - Stop after each module for review. No remote repository or publication has been configured.

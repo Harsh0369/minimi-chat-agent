@@ -1,4 +1,3 @@
-import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import express from 'express';
@@ -10,24 +9,22 @@ import { createApi, finishApp } from './app.js';
 import { notFound } from './http/errors.js';
 
 export async function startServer(config: Config, logger: Logger = log) {
-  const app = createApi(config, logger);
-  const server = createServer(app);
-  server.requestTimeout = 75_000;
-  server.headersTimeout = 10_000;
-  server.keepAliveTimeout = 5_000;
-  server.maxHeadersCount = 100;
+  let ready = false;
+  const app = createApi(config, logger, () => ready);
+  let server: ReturnType<typeof app.listen> | undefined;
   let vite: ViteDevServer | undefined;
   let closePromise: Promise<void> | undefined;
   const close = () =>
     (closePromise ??= (async () => {
       // Close Vite's HMR sockets as well as HTTP sockets; don't hang on an open tab.
       await vite?.close();
-      if (!server.listening) return;
-      const force = setTimeout(() => server.closeAllConnections(), 5_000);
+      if (!server?.listening) return;
+      const listeningServer = server;
+      const force = setTimeout(() => listeningServer.closeAllConnections(), 5_000);
       force.unref();
       try {
         await new Promise<void>((done, reject) =>
-          server.close((error) => (error ? reject(error) : done())),
+          listeningServer.close((error) => (error ? reject(error) : done())),
         );
       } finally {
         clearTimeout(force);
@@ -37,6 +34,9 @@ export async function startServer(config: Config, logger: Logger = log) {
     app.use('/api', notFound);
     let template: string;
     if (config.mode === 'development') {
+      // Vite needs Express's listening server for development WebSockets.
+      // The readiness gate rejects requests until its middleware is attached.
+      server = await listen();
       const { createServer: createViteServer } = await import('vite');
       vite = await createViteServer({
         appType: 'custom',
@@ -60,16 +60,27 @@ export async function startServer(config: Config, logger: Logger = log) {
       res.type('html').send(html.replaceAll('__MINIMI_CSP_NONCE__', String(res.locals.cspNonce)));
     });
     finishApp(app, logger);
-    await new Promise<void>((done, reject) => {
-      server.once('error', reject);
-      server.listen(config.port, config.host, () => {
-        server.off('error', reject);
-        done();
-      });
-    });
+    server ??= await listen();
+    ready = true;
     return { server, close };
   } catch (error) {
     await close();
     throw error;
+  }
+
+  async function listen() {
+    const listeningServer = await new Promise<ReturnType<typeof app.listen>>((done, reject) => {
+      const candidate = app.listen(config.port, config.host);
+      candidate.once('error', reject);
+      candidate.once('listening', () => {
+        candidate.off('error', reject);
+        done(candidate);
+      });
+    });
+    listeningServer.requestTimeout = 75_000;
+    listeningServer.headersTimeout = 10_000;
+    listeningServer.keepAliveTimeout = 5_000;
+    listeningServer.maxHeadersCount = 100;
+    return listeningServer;
   }
 }

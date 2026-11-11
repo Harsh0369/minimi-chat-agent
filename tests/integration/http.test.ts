@@ -1,4 +1,4 @@
-import { createServer, request, type Server } from 'node:http';
+import { request, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApi, finishApp } from '../../src/server/app.js';
@@ -12,6 +12,7 @@ import type { LogEvent } from '../../src/server/logger.js';
 
 let server: Server;
 let origin: string;
+let ready = true;
 const logs: LogEvent[] = [];
 const privateFixture = 'synthetic-provider-key-do-not-disclose';
 beforeAll(async () => {
@@ -26,6 +27,7 @@ beforeAll(async () => {
       CHAT_MODEL: 'fixture-model',
     }),
     logger,
+    () => ready,
   );
   // Test-only routes exercise the production middleware; they are not app endpoints.
   app.post('/api/test/input', (req, res) => res.json(submitMessageSchema.parse(req.body)));
@@ -33,8 +35,9 @@ beforeAll(async () => {
     throw new Error(privateFixture);
   });
   finishApp(app, logger);
-  server = createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  server = await new Promise<Server>((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+  });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('No server address');
   origin = `http://127.0.0.1:${address.port}`;
@@ -55,6 +58,17 @@ function post(body: string, headers: Record<string, string> = {}) {
 }
 
 describe('local HTTP boundary', () => {
+  it('does not report healthy before Express finishes startup', async () => {
+    ready = false;
+    try {
+      const response = await fetch(`${origin}/api/health`);
+      expect(response.status).toBe(503);
+      expect(apiErrorSchema.parse(await response.json()).error.code).toBe('STARTING');
+    } finally {
+      ready = true;
+    }
+  });
+
   it('returns real health and explicitly incomplete capabilities without exposing secrets', async () => {
     const health = await fetch(`${origin}/api/health`);
     expect(await health.json()).toEqual({ status: 'ok' });

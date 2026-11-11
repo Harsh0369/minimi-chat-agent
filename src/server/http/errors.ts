@@ -1,4 +1,4 @@
-import type { ErrorRequestHandler, RequestHandler } from 'express';
+import type { ErrorRequestHandler, RequestHandler, Response } from 'express';
 import { z } from 'zod';
 import type { Logger } from '../logger.js';
 
@@ -16,6 +16,12 @@ export class AppError extends Error {
 export const notFound: RequestHandler = (_req, _res, next) => {
   next(new AppError(404, 'NOT_FOUND', 'This endpoint does not exist.'));
 };
+
+export function sendAppError(res: Response, logger: Logger, error: AppError): void {
+  const requestId = String(res.locals.requestId);
+  logger({ event: 'request_error', requestId, status: error.status, code: error.code });
+  res.status(error.status).json({ error: { code: error.code, message: error.message, requestId } });
+}
 
 function publicError(error: unknown): AppError {
   if (error instanceof AppError) return error;
@@ -46,8 +52,6 @@ export function errorHandler(logger: Logger): ErrorRequestHandler {
       return;
     }
     const safe = publicError(error);
-    const requestId = String(res.locals.requestId);
-    logger({ event: 'request_error', requestId, status: safe.status, code: safe.code });
-    res.status(safe.status).json({ error: { code: safe.code, message: safe.message, requestId } });
+    sendAppError(res, logger, safe);
   };
 }

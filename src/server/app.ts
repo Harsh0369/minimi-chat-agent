@@ -6,10 +6,14 @@ import { missingProviderSettings } from './config.js';
 import type { Logger } from './logger.js';
 import { log } from './logger.js';
 import { attachNonce, localBoundary, securityHeaders } from './http/security.js';
-import { AppError, errorHandler, notFound } from './http/errors.js';
+import { AppError, errorHandler, notFound, sendAppError } from './http/errors.js';
 import { serviceStatusSchema } from '../shared/contracts.js';
 
-export function createApi(config: Config, logger: Logger = log): Express {
+export function createApi(
+  config: Config,
+  logger: Logger = log,
+  isReady: () => boolean = () => true,
+): Express {
   const app = express();
   app.disable('x-powered-by');
   app.disable('etag');
@@ -32,6 +36,17 @@ export function createApi(config: Config, logger: Logger = log): Express {
     next();
   });
   app.use(attachNonce, securityHeaders(config), localBoundary(config));
+  app.use((_req, res, next) => {
+    if (!isReady()) {
+      sendAppError(
+        res,
+        logger,
+        new AppError(503, 'STARTING', 'The local server is starting. Retry shortly.'),
+      );
+      return;
+    }
+    next();
+  });
   app.use('/api', (req, _res, next) => {
     if (['POST', 'PUT', 'PATCH'].includes(req.method) && !req.is('application/json')) {
       next(new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Send application/json.'));
