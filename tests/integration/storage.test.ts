@@ -28,6 +28,54 @@ afterEach(async () => {
 });
 
 describe('durable conversation store', () => {
+  it('retrieves dated and lexical memory only for its owner', async () => {
+    const a = await owner(),
+      b = await owner('other');
+    const c = await db.call('createConversation', a, 'New conversation', time);
+    await db.call('beginTurn', a, c.id, input('Shortlisted Acme CRM and Beta CRM'), time);
+    expect((await db.call('datedMemory', a, time - 1, time + 1)).map((item) => item.text)).toEqual([
+      'Shortlisted Acme CRM and Beta CRM',
+    ]);
+    expect((await db.call('searchMemory', a, 'Acme CRM')).map((item) => item.text)).toEqual([
+      'Shortlisted Acme CRM and Beta CRM',
+    ]);
+    expect(await db.call('searchMemory', b, 'Acme CRM')).toEqual([]);
+    expect((await db.call('conversation', a, c.id)).title).toBe(
+      'Shortlisted Acme CRM and Beta CRM',
+    );
+    await db.call('deleteConversation', a, c.id);
+    expect(await db.call('searchMemory', a, 'Acme CRM')).toEqual([]);
+  });
+  it('commits an answer and its cited source snapshot together', async () => {
+    const a = await owner(),
+      b = await owner('other'),
+      c = await db.call('createConversation', a, 'Evidence', time);
+    const turn = await db.call('beginTurn', a, c.id, input('What changed?'), time);
+    await db.call('startTurn', a, c.id, turn.id, time);
+    await db.call('completeTurn', a, c.id, turn.id, 'The price is listed [S1].', time, [
+      {
+        id: 'S1',
+        title: 'Price page',
+        url: 'https://example.com/pricing',
+        excerpt: 'Plan $10',
+        published: undefined,
+        observedAt: '2026-11-11T12:00:00Z',
+      },
+    ]);
+    expect(await db.call('turnSources', a, c.id, turn.id)).toEqual([
+      {
+        id: 'S1',
+        title: 'Price page',
+        url: 'https://example.com/pricing',
+        excerpt: 'Plan $10',
+        published: null,
+        observedAt: '2026-11-11T12:00:00Z',
+      },
+    ]);
+    await expect(db.call('turnSources', b, c.id, turn.id)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
   it('persists session ownership and conversations across restart, rejects expiry and revocation', async () => {
     const a = await owner();
     const conversation = await db.call('createConversation', a, 'My first question', time);

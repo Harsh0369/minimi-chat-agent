@@ -75,13 +75,17 @@ export function createApi(
     const missing = missingProviderSettings(config);
     res.json(
       serviceStatusSchema.parse({
-        stage: store ? 'persistence' : 'foundation',
-        capabilities: { chat: false, memory: false, webSearch: false },
+        stage: store ? 'agent' : 'foundation',
+        capabilities: {
+          chat: Boolean(store && missing.length === 0),
+          memory: Boolean(store),
+          webSearch: Boolean(store && config.tavilyApiKey),
+        },
         configuration: { providersConfigured: missing.length === 0, missing },
       }),
     );
   });
-  if (store) app.use('/api', persistenceRouter(store));
+  if (store) app.use('/api', persistenceRouter(store, Date.now, config));
   return app;
 }
 

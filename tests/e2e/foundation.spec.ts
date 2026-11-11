@@ -1,5 +1,21 @@
 import { expect, test } from '@playwright/test';
 
+test('creates, resumes and deletes conversations in the browser', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New conversation' }).click();
+  await expect(
+    page.getByRole('navigation', { name: 'Conversations' }).getByText('New conversation'),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('navigation', { name: 'Conversations' }).getByText('New conversation'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Delete New conversation' }).click();
+  await expect(
+    page.getByRole('navigation', { name: 'Conversations' }).getByText('New conversation'),
+  ).toHaveCount(0);
+});
+
 test('keeps workspace sessions in HttpOnly cookies and isolates browser contexts', async ({
   page,
   browser,
@@ -92,7 +108,7 @@ test('loads the real local shell with no provider traffic or browser errors', as
   await expect(page.getByRole('textbox', { name: 'Message' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
   await expect(
-    page.getByText('No messages are collected or sent to AI providers.', { exact: false }),
+    page.getByText('Set GEMINI_API_KEY and TAVILY_API_KEY', { exact: false }),
   ).toBeVisible();
   expect(errors).toEqual([]);
   expect(external).toEqual([]);

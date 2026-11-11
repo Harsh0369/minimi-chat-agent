@@ -130,6 +130,11 @@ export function createStore(path: string, now = Date.now()) {
     const id = randomUUID();
     const messageId =
       existingMessage ?? addMessage(conversationId, 'user', valid.text, valid.timezone, at);
+    if (!existingMessage)
+      db.prepare("UPDATE conversations SET title=? WHERE id=? AND title='New conversation'").run(
+        valid.text.trim().slice(0, 80),
+        conversationId,
+      );
     db.prepare(
       "INSERT INTO turns(id,conversation_id,request_id,request_hash,user_message_id,retry_of,state,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',?,?)",
     ).run(id, conversationId, valid.requestId, requestHash, messageId, retryOf, at, at);
@@ -187,6 +192,67 @@ export function createStore(path: string, now = Date.now()) {
         .all(conversationId, after, limit + 1) as Message[];
       return { items: rows.slice(0, limit), hasMore: rows.length > limit };
     },
+    recentThread(ownerId: string, conversationId: string, limit: number) {
+      owned(ownerId, conversationId);
+      const rows = db
+        .prepare(
+          `SELECT ${messageColumns} FROM messages WHERE conversation_id=? ORDER BY sequence DESC LIMIT ?`,
+        )
+        .all(conversationId, Math.min(limit, 40)) as Message[];
+      return rows.reverse();
+    },
+    recentMemory(ownerId: string, limit: number) {
+      return db
+        .prepare(
+          `SELECT m.id,m.role,m.text,m.created_at AS createdAt,m.timezone,
+        c.title AS conversationTitle FROM messages m JOIN conversations c ON c.id=m.conversation_id
+        WHERE c.owner_id=? ORDER BY m.sequence DESC LIMIT ?`,
+        )
+        .all(ownerId, Math.min(limit, 80)) as Array<{
+        id: string;
+        role: string;
+        text: string;
+        createdAt: number;
+        timezone: string;
+        conversationTitle: string;
+      }>;
+    },
+    datedMemory(ownerId: string, from: number, to: number) {
+      return db
+        .prepare(
+          `SELECT m.id,m.role,m.text,m.created_at AS createdAt,m.timezone,
+        c.title AS conversationTitle FROM messages m JOIN conversations c ON c.id=m.conversation_id
+        WHERE c.owner_id=? AND m.created_at>=? AND m.created_at<? ORDER BY m.created_at,m.sequence LIMIT 100`,
+        )
+        .all(ownerId, from, to) as Array<{
+        id: string;
+        role: string;
+        text: string;
+        createdAt: number;
+        timezone: string;
+        conversationTitle: string;
+      }>;
+    },
+    searchMemory(ownerId: string, query: string) {
+      const tokens = query.match(/[\p{L}\p{N}]{3,}/gu)?.slice(0, 8) ?? [];
+      if (!tokens.length) return [];
+      const safe = tokens.map((token) => `"${token.replaceAll('"', '')}"`).join(' OR ');
+      return db
+        .prepare(
+          `SELECT m.id,m.role,m.text,m.created_at AS createdAt,m.timezone,
+        c.title AS conversationTitle FROM message_search s JOIN messages m ON m.sequence=s.rowid
+        JOIN conversations c ON c.id=m.conversation_id WHERE c.owner_id=? AND message_search MATCH ?
+        ORDER BY bm25(message_search) LIMIT 30`,
+        )
+        .all(ownerId, safe) as Array<{
+        id: string;
+        role: string;
+        text: string;
+        createdAt: number;
+        timezone: string;
+        conversationTitle: string;
+      }>;
+    },
     deleteConversation(ownerId: string, conversationId: string) {
       owned(ownerId, conversationId);
       db.prepare('DELETE FROM conversations WHERE id=? AND owner_id=?').run(
@@ -206,6 +272,35 @@ export function createStore(path: string, now = Date.now()) {
       return db.transaction(() => insertTurn(ownerId, conversationId, input, at)).immediate();
     },
     turn,
+    latestTurn(ownerId: string, conversationId: string) {
+      owned(ownerId, conversationId);
+      return db
+        .prepare(
+          `SELECT ${turnColumns} FROM turns WHERE conversation_id=? ORDER BY rowid DESC LIMIT 1`,
+        )
+        .get(conversationId) as Turn | undefined;
+    },
+    turnMessage(ownerId: string, conversationId: string, turnId: string) {
+      const row = turn(ownerId, conversationId, turnId);
+      return db
+        .prepare(`SELECT ${messageColumns} FROM messages WHERE id=?`)
+        .get(row.userMessageId) as Message;
+    },
+    turnSources(ownerId: string, conversationId: string, turnId: string) {
+      turn(ownerId, conversationId, turnId);
+      return db
+        .prepare(
+          `SELECT source_id AS id,title,url,excerpt,published_at AS published,observed_at AS observedAt FROM turn_sources WHERE turn_id=? ORDER BY source_id`,
+        )
+        .all(turnId) as Array<{
+        id: string;
+        title: string;
+        url: string;
+        excerpt: string;
+        published: string | null;
+        observedAt: string;
+      }>;
+    },
     startTurn(ownerId: string, conversationId: string, turnId: string, at: number) {
       const row = turn(ownerId, conversationId, turnId);
       if (row.state !== 'pending') throw new StoreError('INVALID_TURN_STATE');
@@ -218,6 +313,14 @@ export function createStore(path: string, now = Date.now()) {
       turnId: string,
       text: string,
       at: number,
+      sources: Array<{
+        id: string;
+        title: string;
+        url: string;
+        excerpt: string;
+        published: string | null | undefined;
+        observedAt: string;
+      }> = [],
     ): Turn {
       if (!text.trim() || text.length > 64000) throw new StoreError('INVALID_INPUT');
       return db
@@ -235,6 +338,17 @@ export function createStore(path: string, now = Date.now()) {
             .prepare('SELECT timezone FROM messages WHERE id=?')
             .get(row.userMessageId) as { timezone: string };
           const messageId = addMessage(conversationId, 'assistant', text, original.timezone, at);
+          const insertSource = db.prepare('INSERT INTO turn_sources VALUES(?,?,?,?,?,?,?)');
+          for (const source of sources.slice(0, 10))
+            insertSource.run(
+              turnId,
+              source.id,
+              source.title,
+              source.url,
+              source.excerpt,
+              source.published ?? null,
+              source.observedAt,
+            );
           db.prepare(
             "UPDATE turns SET state='completed',assistant_message_id=?,updated_at=? WHERE id=?",
           ).run(messageId, at, turnId);

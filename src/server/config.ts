@@ -15,10 +15,9 @@ const envSchema = z.object({
     .pipe(z.number().int().min(1).max(65535))
     .prefault('3000'),
   DATABASE_PATH: z.string().trim().min(1).default('./data/minimi.sqlite'),
-  OPENAI_API_KEY: optionalSetting,
+  GEMINI_API_KEY: optionalSetting,
   TAVILY_API_KEY: optionalSetting,
-  CHAT_MODEL: optionalSetting,
-  EMBEDDING_MODEL: z.string().trim().min(1).default('text-embedding-3-small'),
+  CHAT_MODEL: z.string().trim().min(1).default('gemini-2.5-flash'),
 });
 
 export class ConfigurationError extends Error {
@@ -42,18 +41,16 @@ export function readConfig(env: Record<string, string | undefined>) {
     host: value.HOST,
     port: value.PORT,
     databasePath: value.DATABASE_PATH,
-    openaiApiKey: value.OPENAI_API_KEY,
+    geminiApiKey: value.GEMINI_API_KEY,
     tavilyApiKey: value.TAVILY_API_KEY,
     chatModel: value.CHAT_MODEL,
-    embeddingModel: value.EMBEDDING_MODEL,
   });
 }
 export type Config = ReturnType<typeof readConfig>;
 
 export function missingProviderSettings(config: Config): MissingSetting[] {
   const missing: MissingSetting[] = [];
-  if (!config.openaiApiKey) missing.push('OPENAI_API_KEY');
+  if (!config.geminiApiKey) missing.push('GEMINI_API_KEY');
   if (!config.tavilyApiKey) missing.push('TAVILY_API_KEY');
-  if (!config.chatModel) missing.push('CHAT_MODEL');
   return missing;
 }

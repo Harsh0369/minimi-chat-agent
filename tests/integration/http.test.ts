@@ -22,7 +22,7 @@ beforeAll(async () => {
   const app = createApi(
     readConfig({
       NODE_ENV: 'test',
-      OPENAI_API_KEY: privateFixture,
+      GEMINI_API_KEY: privateFixture,
       TAVILY_API_KEY: privateFixture,
       CHAT_MODEL: 'fixture-model',
     }),

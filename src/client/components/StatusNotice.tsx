@@ -28,12 +28,14 @@ export function StatusNotice({
           <p>Couldn’t load this workspace. Please try again.</p>
           <Button onClick={onRetry}>Try again</Button>
         </div>
+      ) : connection.state === 'ready' && !connection.status.capabilities.chat ? (
+        <p>
+          Set GEMINI_API_KEY and TAVILY_API_KEY in .env, then restart the server to enable chat.
+        </p>
       ) : (
         <p>
-          <span className="font-medium text-ink">You’re viewing an early preview.</span> Chat is not
-          available yet.
-          <br />
-          No messages are collected or sent to AI providers.
+          Conversations are stored on this computer. Search and model requests use your configured
+          providers.
         </p>
       )}
     </div>

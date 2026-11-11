@@ -18,7 +18,7 @@ export function useServiceStatus() {
         });
         if (!response.ok) throw new Error('Service unavailable');
         const status = serviceStatusSchema.parse(await response.json());
-        if (status.stage === 'persistence') {
+        if (status.stage === 'persistence' || status.stage === 'agent') {
           const session = await fetch('/api/session', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

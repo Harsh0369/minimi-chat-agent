@@ -1,0 +1,61 @@
+import { z } from 'zod';
+import { readBoundedJson } from './readJson.js';
+
+const resultSchema = z.object({
+  results: z
+    .array(
+      z.object({
+        title: z.string(),
+        url: z.url(),
+        content: z.string().default(''),
+        published_date: z.string().nullable().optional(),
+      }),
+    )
+    .default([]),
+});
+export type SearchResult = {
+  id: string;
+  title: string;
+  url: string;
+  excerpt: string;
+  published: string | null;
+  observedAt: string;
+};
+export async function webSearch(
+  key: string,
+  query: string,
+  signal: AbortSignal,
+): Promise<SearchResult[]> {
+  const response = await fetch('https://api.tavily.com/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      query: query.slice(0, 250),
+      search_depth: 'basic',
+      max_results: 5,
+      include_answer: false,
+      include_raw_content: false,
+      include_published_date: true,
+    }),
+    signal,
+  });
+  if (!response.ok) throw new Error(`SEARCH_${response.status}`);
+  const data = resultSchema.parse(await readBoundedJson(response, 1_000_000));
+  return data.results
+    .filter((item) => {
+      try {
+        const url = new URL(item.url);
+        return url.protocol === 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname);
+      } catch {
+        return false;
+      }
+    })
+    .map((item, index) => ({
+      id: `S${index + 1}`,
+      title: item.title.slice(0, 180),
+      url: item.url,
+      excerpt: item.content.slice(0, 1600),
+      published: item.published_date ?? null,
+      observedAt: new Date().toISOString(),
+    }));
+}

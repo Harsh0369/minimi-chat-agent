@@ -8,6 +8,10 @@ import {
   SESSION_LIFETIME_MS,
 } from '../sessions/service.js';
 import { AppError } from '../http/errors.js';
+import type { Config } from '../config.js';
+import { answer } from '../agent/service.js';
+import { submitMessageSchema } from '../../shared/contracts.js';
+import type { Turn } from '../storage/store.js';
 
 const empty = z.strictObject({});
 const id = z.uuid();
@@ -26,8 +30,87 @@ const messagePage = z.strictObject({
 });
 const cookieOptions = { httpOnly: true, sameSite: 'strict' as const, path: '/', secure: false };
 // HTTP is intentionally loopback-only. Public HTTPS/account login is a separate deployment mode.
-export function persistenceRouter(store: StorePort, clock: () => number = Date.now) {
+export function persistenceRouter(
+  store: StorePort,
+  clock: () => number = Date.now,
+  config?: Config,
+) {
   const router = Router();
+  const active = new Map<string, AbortController>();
+  let admitted = 0;
+  function reserve() {
+    if (admitted >= 3)
+      throw new AppError(
+        429,
+        'AGENT_BUSY',
+        'Three answers are already in progress. Retry shortly.',
+      );
+    admitted++;
+  }
+  async function execute(
+    ownerId: string,
+    conversationId: string,
+    turn: Turn,
+    input: { text: string; timezone: string },
+  ) {
+    if (!config?.geminiApiKey || !config.tavilyApiKey)
+      throw new AppError(
+        503,
+        'PROVIDER_NOT_CONFIGURED',
+        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
+      );
+    const controller = new AbortController();
+    active.set(turn.id, controller);
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    try {
+      await store.call('startTurn', ownerId, conversationId, turn.id, clock());
+      const result = await answer(
+        config,
+        store,
+        ownerId,
+        conversationId,
+        input.text,
+        turn.userMessageId,
+        input.timezone,
+        clock(),
+        controller.signal,
+      );
+      const sources = result.citations.length
+        ? '\n\nSources:\n' +
+          result.citations.map((item) => `[${item.id}] ${item.title} — ${item.url}`).join('\n')
+        : '';
+      return await store.call(
+        'completeTurn',
+        ownerId,
+        conversationId,
+        turn.id,
+        result.text + sources,
+        clock(),
+        result.citations,
+      );
+    } catch {
+      try {
+        await store.call(
+          'stopTurn',
+          ownerId,
+          conversationId,
+          turn.id,
+          controller.signal.aborted ? 'cancelled' : 'failed',
+          clock(),
+        );
+      } catch {
+        /* Already cancelled. */
+      }
+      throw new AppError(
+        controller.signal.aborted ? 504 : 502,
+        controller.signal.aborted ? 'AGENT_TIMEOUT' : 'AGENT_FAILED',
+        'The answer could not be completed. You can retry.',
+      );
+    } finally {
+      clearTimeout(timeout);
+      active.delete(turn.id);
+    }
+  }
   const sessions = createSessionService(store, clock);
   router.post('/session', async (req, res) => {
     empty.parse(req.body);
@@ -89,8 +172,27 @@ export function persistenceRouter(store: StorePort, clock: () => number = Date.n
       ),
     );
   });
+  router.get('/conversations/:id/latest-turn', async (req, res) => {
+    const turn = await store.call(
+      'latestTurn',
+      String(res.locals.ownerId),
+      id.parse(req.params.id),
+    );
+    res.json(turn ?? null);
+  });
+  router.get('/conversations/:id/turns/:turnId/sources', async (req, res) => {
+    res.json(
+      await store.call(
+        'turnSources',
+        String(res.locals.ownerId),
+        id.parse(req.params.id),
+        id.parse(req.params.turnId),
+      ),
+    );
+  });
   router.post('/conversations/:id/turns/:turnId/cancel', async (req, res) => {
     empty.parse(req.body);
+    active.get(id.parse(req.params.turnId))?.abort();
     res.json(
       await store.call(
         'stopTurn',
@@ -103,8 +205,57 @@ export function persistenceRouter(store: StorePort, clock: () => number = Date.n
     );
   });
   router.post('/conversations/:id/messages', async (req, res) => {
-    await store.call('conversation', String(res.locals.ownerId), id.parse(req.params.id));
-    throw new AppError(503, 'AGENT_NOT_READY', 'Chat is not available yet.');
+    const ownerId = String(res.locals.ownerId),
+      conversationId = id.parse(req.params.id);
+    if (!config?.geminiApiKey || !config.tavilyApiKey)
+      throw new AppError(
+        503,
+        'PROVIDER_NOT_CONFIGURED',
+        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
+      );
+    const input = submitMessageSchema.parse(req.body);
+    reserve();
+    try {
+      const existing = await store.call('beginTurn', ownerId, conversationId, input, clock());
+      if (existing.state !== 'pending' || active.has(existing.id)) {
+        res.json(existing);
+        return;
+      }
+      res.json(await execute(ownerId, conversationId, existing, input));
+    } finally {
+      admitted--;
+    }
+  });
+  router.post('/conversations/:id/turns/:turnId/retry', async (req, res) => {
+    if (!config?.geminiApiKey || !config.tavilyApiKey)
+      throw new AppError(
+        503,
+        'PROVIDER_NOT_CONFIGURED',
+        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
+      );
+    const ownerId = String(res.locals.ownerId),
+      conversationId = id.parse(req.params.id),
+      turnId = id.parse(req.params.turnId);
+    const { requestId } = z.strictObject({ requestId: z.uuid() }).parse(req.body);
+    reserve();
+    try {
+      const retry = await store.call(
+        'retryTurn',
+        ownerId,
+        conversationId,
+        turnId,
+        requestId,
+        clock(),
+      );
+      if (retry.state !== 'pending' || active.has(retry.id)) {
+        res.json(retry);
+        return;
+      }
+      const message = await store.call('turnMessage', ownerId, conversationId, retry.id);
+      res.json(await execute(ownerId, conversationId, retry, message));
+    } finally {
+      admitted--;
+    }
   });
   router.delete('/history', async (req, res) => {
     await store.call('deleteHistory', String(res.locals.ownerId));

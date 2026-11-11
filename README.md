@@ -1,31 +1,34 @@
-# minimi chat agent
+# Thread — minimi chat agent challenge
 
-Harsh Agarwal's local implementation of the minimi Software Engineering Intern challenge.
+A local, time-aware chat agent with one external tool: `web_search`. It can use earlier conversations, look up current information, and cite web results. Built in TypeScript for Node 24, with Express, React, SQLite, Gemini, and Tavily.
 
-**Current stage: Module 2 — persistent conversations and browser sessions.** The app serves a React preview and an Express API backed by SQLite. The browser establishes an opaque session and can resume it after a restart. Conversation and turn storage is available through the API. The chat composer remains disabled until the agent and conversation UI are connected; no fake answers are shown.
+## Start
 
-- [Build plan](docs/BUILD_PLAN.md): module boundaries, dependencies and acceptance gates.
-- [UI design](docs/UI_DESIGN.md): Tailwind tokens, component responsibilities, accessibility, and responsive layout.
-- [Minimi alignment](docs/MINIMI_ALIGNMENT.md): final company/challenge check, sources and limitations.
-- [DESIGN.md](DESIGN.md): concise target architecture; later modules remain proposals.
-- [Architecture review](docs/ARCHITECTURE.md): detailed decisions and evaluation gates.
-- [Access design](docs/ACCESS_DESIGN.md): local session behavior, ownership rules, and public-hosting requirements.
-- [Analysis review](docs/ANALYSIS_REVIEW.md): comparison with the two supplied architecture and free-tier proposals.
-
-## Run locally
-
-Use Node **24.14.1** (also recorded in `.nvmrc` and `.node-version`). From the repository root:
+Use Node **24.14.1**. From this directory:
 
 ```sh
 npm install
+cp .env.example .env
+# Add GEMINI_API_KEY and TAVILY_API_KEY to .env
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000**. SQLite is initialized at `./data/minimi.sqlite` on startup; no separate database service, API key, or Docker installation is needed. The chat composer is intentionally disabled until the agent modules are connected.
+Open http://127.0.0.1:3000. On Windows PowerShell, copy the file with `Copy-Item .env.example .env`. An optional `CHAT_MODEL` selects an accessible Gemini model; the default is `gemini-2.5-flash`. Keys stay on the server. Without them, the app still opens and shows why chat is unavailable. The local SQLite file is created automatically in `./data`.
 
-Copy `.env.example` to `.env` for optional configuration. `PORT` changes the port; `HOST` accepts only `127.0.0.1` or `::1`. For IPv6, use `http://[::1]:3000`. Invalid settings fail startup with field names rather than secret values. The `.env` file is ignored by Git.
+**Cost and privacy:** Gemini and Tavily free tiers are quota-limited and can change. The Gemini unpaid tier permits Google to use prompts and responses to improve products. Check your account's current limits and terms before entering sensitive chats. No billing account is required by this app.
 
-The current status contract still lists `OPENAI_API_KEY`, `TAVILY_API_KEY` and `CHAT_MODEL` as future settings. No provider requests are made in Modules 1–2. Provider choice remains open to evaluation, including eligible free-tier models and their privacy terms; supplying keys does not enable chat today.
+## What works
+
+- Multiple conversations in one browser workspace; the original messages and their timestamps survive app restarts. New conversations get a title from the first message. Sessions use an HttpOnly cookie and owner-scoped database queries. This is a local workspace, not cross-device sign-in.
+- Exact user-local calendar-day lookup for explicit dates, today/yesterday, and last/this weekday; SQLite FTS5 retrieves older topical messages. The agent receives relevant original messages rather than synthetic memories. A missing dated question is answered without a model call.
+- A bounded single-agent loop with only `web_search` exposed as a model tool. Tavily returns up to five results per query; the loop permits at most four searches per answer and can run independent searches together. Sources have IDs, excerpts, publication dates when supplied, and observation times. Only returned IDs can appear as citations; cited source snapshots are committed with the answer.
+- Durable turns are idempotent and have retry/cancel endpoints. A three-turn concurrency limit, 45-second deadline, bounded database queue, input validation, and explicit provider errors limit overload. The UI has conversation history, source links, loading state, and retry controls.
+
+## Architecture and limits
+
+See [DESIGN.md](DESIGN.md) for the one-page explanation. Express owns HTTP, security, sessions, and agent orchestration. A single worker serializes SQLite operations. `src/server/agent` contains time parsing, memory assembly, Gemini, and Tavily adapters; `src/client` contains the React UI. The browser never receives provider keys. No vector database or extra agent framework is needed for this small local corpus.
+
+This is optimized for a **single local process**. Another browser profile or device has a different workspace. Date lookup supports one explicitly mentioned day, and topic recall uses lexical matching, so vague paraphrases can be missed. Model answers and whether a citation truly supports a claim still need live evaluation; syntactic citation validation alone cannot guarantee factual correctness. The repository has no provider keys, so automated tests mock upstream responses. Search result excerpts and observation timestamps are retained for inspection, but historical price changes cannot be proven without comparable earlier evidence.
 
 ## Verify
 
@@ -36,21 +39,6 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Browser installation is only needed for developer tests, not app startup. `npm run check` runs types, lint, formatting, and unit/integration tests. Playwright exercises the running development service using a separate port and blank provider credentials. `npm start` serves the built application locally after `npm run build`.
+For production browser tests, set `PLAYWRIGHT_SERVER_MODE=production` and run `npm run test:e2e` after building. `npm start` serves the production build. Browser tests do not call paid providers.
 
-To run the same browser tests against the production build in PowerShell, set `$env:PLAYWRIGHT_SERVER_MODE='production'` and run `npm run test:e2e`. Clear that variable before returning to development browser tests.
-
-`GET /api/health` checks that the HTTP process and database worker are available, not model or search providers. `GET /api/status` reports implemented capabilities separately from provider configuration. Unknown API paths return a structured JSON error. Operational logs contain request IDs, status, method and duration, not bodies, query strings, credentials or private error messages.
-
-The browser calls `POST /api/session` on load. The server issues a random HttpOnly, SameSite cookie and stores only its hash. An invalid or expired cookie requires an explicit **Start new workspace** action; old history is not silently attached to a new owner. The API supports session resume/revocation, owned conversation creation/listing/detail/deletion, paged messages, turn inspection/cancellation, and deleting the current owner's history. `POST /api/conversations/:id/messages` returns `AGENT_NOT_READY` until live agent execution exists. See [the Module 2 API contract](docs/MODULE_2.md).
-
-## Development boundaries
-
-- `src/shared` contains browser-safe schemas; it must never import server configuration.
-- `src/server` owns Express routes, configuration, HTTP lifecycle and security. SQLite runs in one worker behind a typed command port; HTTP routes cannot execute SQL directly. Express starts with `app.listen`; Vite attaches to its development server for browser refresh. Later modules add retrieval, providers and orchestration behind explicit interfaces.
-- `src/client/App.tsx` composes the page. `src/client/components` owns display sections, and `src/client/hooks` owns status fetching and retry. The hook validates API responses against the shared contract.
-- Local developer MCPs and Graft are not application dependencies or runtime tools.
-- Supported use is one local process. Browser sessions identify a workspace, not a verified person. Public hosting requires a separate sign-in and spending-control design.
-- Stop after each module for review. The Module 1 code was pushed to a private GitHub repository; local Module 2 work stays available for review before a later push.
-
-Application form supplied by the user: https://binary.so/YIrD8L5
+The challenge requires a **public** repository and a short `DESIGN.md` for submission. This repo remains private until explicitly published. The application form also asks for a one-minute explanation video; that is a separate submission task.

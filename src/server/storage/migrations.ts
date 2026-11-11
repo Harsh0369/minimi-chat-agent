@@ -2,10 +2,10 @@ import type Database from 'better-sqlite3';
 
 export function migrate(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version > 1) throw new Error('Unsupported database version');
-  if (version === 1) return;
-  db.transaction(() => {
-    db.exec(`
+  if (version > 3) throw new Error('Unsupported database version');
+  if (version === 0)
+    db.transaction(() => {
+      db.exec(`
       CREATE TABLE owners (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL) STRICT;
       CREATE TABLE sessions (
         token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES owners(id) ON DELETE CASCADE,
@@ -42,5 +42,32 @@ export function migrate(db: Database.Database) {
       CREATE INDEX turns_conversation ON turns(conversation_id);
       PRAGMA user_version = 1;
     `);
-  }).immediate();
+    }).immediate();
+  if (version < 2)
+    db.transaction(() => {
+      db.exec(`
+      CREATE VIRTUAL TABLE message_search USING fts5(text, content='messages', content_rowid='sequence', tokenize='unicode61');
+      INSERT INTO message_search(message_search) VALUES('rebuild');
+      CREATE TRIGGER message_search_insert AFTER INSERT ON messages BEGIN
+        INSERT INTO message_search(rowid,text) VALUES(new.sequence,new.text);
+      END;
+      CREATE TRIGGER message_search_delete AFTER DELETE ON messages BEGIN
+        INSERT INTO message_search(message_search,rowid,text) VALUES('delete',old.sequence,old.text);
+      END;
+      CREATE INDEX messages_created ON messages(created_at,conversation_id);
+      PRAGMA user_version = 2;
+    `);
+    }).immediate();
+  if (version < 3)
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE turn_sources (
+          turn_id TEXT NOT NULL REFERENCES turns(id) ON DELETE CASCADE,
+          source_id TEXT NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
+          excerpt TEXT NOT NULL, published_at TEXT, observed_at TEXT NOT NULL,
+          PRIMARY KEY(turn_id,source_id)
+        ) STRICT;
+        PRAGMA user_version = 3;
+      `);
+    }).immediate();
 }

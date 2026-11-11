@@ -4,9 +4,15 @@ import { PreviewConversation } from './components/PreviewConversation.js';
 import { StatusNotice } from './components/StatusNotice.js';
 import { SiteFooter } from './components/SiteFooter.js';
 import { useServiceStatus } from './hooks/useServiceStatus.js';
+import { useConversations } from './hooks/useConversations.js';
 
 export function App() {
   const { connection, retry, reset } = useServiceStatus();
+  const chats = useConversations(
+    connection.state === 'ready' && connection.status.stage === 'agent',
+  );
+  const enabled =
+    connection.state === 'ready' && connection.status.capabilities.chat && Boolean(chats.selected);
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
       <a
@@ -15,7 +21,13 @@ export function App() {
       >
         Skip to conversation
       </a>
-      <Sidebar />
+      <Sidebar
+        conversations={chats.conversations}
+        selected={chats.selected}
+        onSelect={chats.setSelected}
+        onCreate={() => void chats.create()}
+        onDelete={(id) => void chats.remove(id)}
+      />
       <div className="flex min-w-0 flex-col">
         <SiteHeader />
         <main
@@ -34,7 +46,31 @@ export function App() {
           <p className="mt-5 max-w-[490px] text-[15px] leading-7 text-muted">
             Revisit earlier questions and check what has changed.
           </p>
-          <PreviewConversation />
+          <PreviewConversation
+            messages={chats.messages}
+            onSend={chats.send}
+            busy={chats.busy}
+            enabled={enabled}
+            onCancel={() => void chats.cancel()}
+          />
+          {chats.error && (
+            <p role="alert" className="mt-4 text-sm text-red-700">
+              {chats.error}{' '}
+              {chats.failedTurn && (
+                <button onClick={() => void chats.retry()} className="ml-2 underline">
+                  Retry answer
+                </button>
+              )}
+            </p>
+          )}
+          {!chats.error && chats.failedTurn && (
+            <button
+              onClick={() => void chats.retry()}
+              className="mt-4 self-start text-sm text-accent underline"
+            >
+              Retry unanswered question
+            </button>
+          )}
           <StatusNotice connection={connection} onRetry={retry} onReset={reset} />
           <SiteFooter />
         </main>

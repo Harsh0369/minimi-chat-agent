@@ -135,7 +135,7 @@ describe('session and conversation HTTP API', () => {
       timezone: 'UTC',
     });
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: 'AGENT_NOT_READY' } });
+    expect(await response.json()).toMatchObject({ error: { code: 'PROVIDER_NOT_CONFIGURED' } });
     expect(await (await api('/conversations/' + c.id + '/messages', 'GET', cookie)).json()).toEqual(
       { items: [], hasMore: false },
     );

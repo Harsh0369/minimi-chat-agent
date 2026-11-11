@@ -7,14 +7,10 @@ import {
 
 describe('configuration boundary', () => {
   it('can start the foundation without provider secrets and reports what is missing', () => {
-    const config = readConfig({ OPENAI_API_KEY: '  ', TAVILY_API_KEY: '', CHAT_MODEL: '' });
+    const config = readConfig({ GEMINI_API_KEY: '  ', TAVILY_API_KEY: '' });
     expect(config.host).toBe('127.0.0.1');
     expect(config.port).toBe(3000);
-    expect(missingProviderSettings(config)).toEqual([
-      'OPENAI_API_KEY',
-      'TAVILY_API_KEY',
-      'CHAT_MODEL',
-    ]);
+    expect(missingProviderSettings(config)).toEqual(['GEMINI_API_KEY', 'TAVILY_API_KEY']);
     expect(Object.isFrozen(config)).toBe(true);
   });
 
@@ -34,7 +30,7 @@ describe('configuration boundary', () => {
 
   it('does not include invalid values or provider secrets in configuration errors', () => {
     const secret = 'fixture-secret-never-print';
-    expect(() => readConfig({ NODE_ENV: secret, OPENAI_API_KEY: secret })).toThrow('NODE_ENV');
+    expect(() => readConfig({ NODE_ENV: secret, GEMINI_API_KEY: secret })).toThrow('NODE_ENV');
     try {
       readConfig({ NODE_ENV: secret });
     } catch (error) {

@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
 // Client-safe contracts only. Never import server configuration from this module.
-export const missingSettingSchema = z.enum(['OPENAI_API_KEY', 'TAVILY_API_KEY', 'CHAT_MODEL']);
+export const missingSettingSchema = z.enum(['GEMINI_API_KEY', 'TAVILY_API_KEY']);
 export type MissingSetting = z.infer<typeof missingSettingSchema>;
 
 export const serviceStatusSchema = z.strictObject({
-  stage: z.enum(['foundation', 'persistence']),
+  stage: z.enum(['foundation', 'persistence', 'agent']),
   capabilities: z.strictObject({
-    chat: z.literal(false),
-    memory: z.literal(false),
-    webSearch: z.literal(false),
+    chat: z.boolean(),
+    memory: z.boolean(),
+    webSearch: z.boolean(),
   }),
   configuration: z.strictObject({
     providersConfigured: z.boolean(),
