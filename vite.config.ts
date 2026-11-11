@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   root: fileURLToPath(new URL('./src/client', import.meta.url)),
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   // Replaced per HTML response, never used as a real fixed CSP nonce.
   html: { cspNonce: '__MINIMI_CSP_NONCE__' },
   build: {

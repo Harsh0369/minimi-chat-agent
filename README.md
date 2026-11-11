@@ -5,6 +5,7 @@ Harsh Agarwal's local implementation of the minimi Software Engineering Intern c
 **Current stage: Module 1 — application foundation.** The application serves a React preview and a validated Express API. Chat, memory, SQLite persistence, web search, model calls, and live evaluations are not implemented yet. No fake conversations or mock answers are presented as real functionality.
 
 - [Build plan](docs/BUILD_PLAN.md): module boundaries, dependencies and acceptance gates.
+- [UI design](docs/UI_DESIGN.md): Tailwind tokens, component responsibilities, accessibility, and responsive layout.
 - [Minimi alignment](docs/MINIMI_ALIGNMENT.md): final company/challenge check, sources and limitations.
 - [DESIGN.md](DESIGN.md): concise target architecture; later modules remain proposals.
 - [Architecture review](docs/ARCHITECTURE.md): detailed decisions and evaluation gates.

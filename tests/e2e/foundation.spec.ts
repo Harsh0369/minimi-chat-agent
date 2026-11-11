@@ -40,3 +40,32 @@ test('fits a narrow viewport without horizontal overflow', async ({ page }) => {
   expect(fits).toBe(true);
   await page.screenshot({ path: 'test-results/foundation-mobile.png', fullPage: true });
 });
+
+test('keeps the composer within the viewport across layout breakpoints', async ({ page }) => {
+  await page.goto('/');
+  for (const width of [320, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const composer = await page.getByRole('textbox', { name: 'Message' }).boundingBox();
+    expect(composer).not.toBeNull();
+    expect(composer!.x).toBeGreaterThanOrEqual(0);
+    expect(composer!.x + composer!.width).toBeLessThanOrEqual(width);
+  }
+});
+
+test('supports keyboard navigation to the conversation and retry control', async ({ page }) => {
+  await page.route('**/api/status', (route) => route.abort());
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Retry connection' })).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('link', { name: 'Skip to conversation' })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('main')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Retry connection' })).toBeFocused();
+  await page.unroute('**/api/status');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status')).toHaveText('Local server connected');
+});
