@@ -13,7 +13,9 @@ cp .env.example .env
 npm run dev
 ```
 
-Open http://127.0.0.1:3000. On Windows PowerShell, copy the file with `Copy-Item .env.example .env`. An optional `CHAT_MODEL` selects an accessible Gemini model; the default is `gemini-2.5-flash`. Keys stay on the server. Without them, the app still opens and shows why chat is unavailable. The local SQLite file is created automatically in `./data`.
+Open http://127.0.0.1:3000. On Windows PowerShell, copy the file with `Copy-Item .env.example .env`. An optional `CHAT_MODEL` selects an accessible Gemini model; the default is `gemini-3.5-flash-lite`. Keys stay on the server. Without them, the app still opens and shows why chat is unavailable. The local SQLite file is created automatically in `./data`.
+
+Optional `EMBEDDING_MODEL=gemini-embedding-001` adds semantic recall over the latest 80 messages, with a bounded vector cache and lexical fallback. See [the live review](docs/LIVE_REVIEW.md) for observed provider results, rate limits, and the remaining evaluation limits.
 
 **Cost and privacy:** Gemini and Tavily free tiers are quota-limited and can change. The Gemini unpaid tier permits Google to use prompts and responses to improve products. Check your account's current limits and terms before entering sensitive chats. No billing account is required by this app.
 

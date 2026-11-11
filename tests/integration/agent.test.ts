@@ -90,7 +90,7 @@ describe('agent execution', () => {
                           thoughtSignature: 'opaque-signature',
                         },
                       ]
-                    : [{ text: 'Acme lists a price [S1]. Unsupported citation [S99].' }],
+                    : [{ text: 'Acme lists a price [S1, S99]. Unsupported citation [S99].' }],
               },
             },
           ],

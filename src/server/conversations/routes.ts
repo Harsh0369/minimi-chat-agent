@@ -12,6 +12,7 @@ import type { Config } from '../config.js';
 import { answer } from '../agent/service.js';
 import { submitMessageSchema } from '../../shared/contracts.js';
 import type { Turn } from '../storage/store.js';
+import { turnRateLimit } from '../http/rateLimit.js';
 
 const empty = z.strictObject({});
 const id = z.uuid();
@@ -36,6 +37,7 @@ export function persistenceRouter(
   config?: Config,
 ) {
   const router = Router();
+  const limitTurns = turnRateLimit(clock);
   const active = new Map<string, AbortController>();
   let admitted = 0;
   function reserve() {
@@ -192,6 +194,12 @@ export function persistenceRouter(
   });
   router.post('/conversations/:id/turns/:turnId/cancel', async (req, res) => {
     empty.parse(req.body);
+    await store.call(
+      'turn',
+      String(res.locals.ownerId),
+      id.parse(req.params.id),
+      id.parse(req.params.turnId),
+    );
     active.get(id.parse(req.params.turnId))?.abort();
     res.json(
       await store.call(
@@ -204,7 +212,7 @@ export function persistenceRouter(
       ),
     );
   });
-  router.post('/conversations/:id/messages', async (req, res) => {
+  router.post('/conversations/:id/messages', limitTurns, async (req, res) => {
     const ownerId = String(res.locals.ownerId),
       conversationId = id.parse(req.params.id);
     if (!config?.geminiApiKey || !config.tavilyApiKey)
@@ -226,7 +234,7 @@ export function persistenceRouter(
       admitted--;
     }
   });
-  router.post('/conversations/:id/turns/:turnId/retry', async (req, res) => {
+  router.post('/conversations/:id/turns/:turnId/retry', limitTurns, async (req, res) => {
     if (!config?.geminiApiKey || !config.tavilyApiKey)
       throw new AppError(
         503,

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { readBoundedJson } from './readJson.js';
+import { fetchProvider } from './fetchProvider.js';
 
 const part = z
   .object({
@@ -21,7 +22,7 @@ export async function generate(
   contents: ModelContent[],
   signal: AbortSignal,
 ) {
-  const response = await fetch(
+  const response = await fetchProvider(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: 'POST',

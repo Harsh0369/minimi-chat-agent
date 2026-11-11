@@ -17,7 +17,8 @@ const envSchema = z.object({
   DATABASE_PATH: z.string().trim().min(1).default('./data/minimi.sqlite'),
   GEMINI_API_KEY: optionalSetting,
   TAVILY_API_KEY: optionalSetting,
-  CHAT_MODEL: z.string().trim().min(1).default('gemini-2.5-flash'),
+  CHAT_MODEL: z.string().trim().min(1).default('gemini-3.5-flash-lite'),
+  EMBEDDING_MODEL: z.enum(['gemini-embedding-001']).optional(),
 });
 
 export class ConfigurationError extends Error {
@@ -44,6 +45,7 @@ export function readConfig(env: Record<string, string | undefined>) {
     geminiApiKey: value.GEMINI_API_KEY,
     tavilyApiKey: value.TAVILY_API_KEY,
     chatModel: value.CHAT_MODEL,
+    embeddingModel: value.EMBEDDING_MODEL,
   });
 }
 export type Config = ReturnType<typeof readConfig>;
