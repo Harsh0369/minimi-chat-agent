@@ -6,7 +6,7 @@ import { SiteFooter } from './components/SiteFooter.js';
 import { useServiceStatus } from './hooks/useServiceStatus.js';
 
 export function App() {
-  const { connection, retry } = useServiceStatus();
+  const { connection, retry, reset } = useServiceStatus();
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
       <a
@@ -35,7 +35,7 @@ export function App() {
             Revisit earlier questions and check what has changed.
           </p>
           <PreviewConversation />
-          <StatusNotice connection={connection} onRetry={retry} />
+          <StatusNotice connection={connection} onRetry={retry} onReset={reset} />
           <SiteFooter />
         </main>
       </div>

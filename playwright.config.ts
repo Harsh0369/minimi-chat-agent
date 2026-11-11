@@ -18,6 +18,7 @@ export default defineConfig({
       NODE_ENV: production ? 'production' : 'development',
       HOST: '127.0.0.1',
       PORT: '3100',
+      DATABASE_PATH: './data/playwright.sqlite',
       OPENAI_API_KEY: '',
       TAVILY_API_KEY: '',
       CHAT_MODEL: '',

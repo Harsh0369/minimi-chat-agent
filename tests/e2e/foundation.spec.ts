@@ -1,5 +1,79 @@
 import { expect, test } from '@playwright/test';
 
+test('keeps workspace sessions in HttpOnly cookies and isolates browser contexts', async ({
+  page,
+  browser,
+}) => {
+  const firstSession = page.waitForResponse(
+    (response) => response.url().endsWith('/api/session') && response.request().method() === 'POST',
+  );
+  await page.goto('/');
+  expect((await firstSession).ok()).toBe(true);
+  const first = await page.evaluate(async () => {
+    const session = await fetch('/api/session');
+    const created = await fetch('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Browser session' }),
+    });
+    return {
+      sessionStatus: session.status,
+      conversation: (await created.json()) as { id: string },
+      visibleCookie: document.cookie,
+    };
+  });
+  expect(first.sessionStatus).toBe(200);
+  expect(first.visibleCookie).not.toContain('thread_session');
+  await page.reload();
+  expect(
+    await page.evaluate(
+      async (id) => (await fetch('/api/conversations/' + id)).status,
+      first.conversation.id,
+    ),
+  ).toBe(200);
+  const other = await browser.newContext();
+  try {
+    const second = await other.newPage();
+    const secondSession = second.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/session') && response.request().method() === 'POST',
+    );
+    await second.goto('http://127.0.0.1:3100/');
+    expect((await secondSession).ok()).toBe(true);
+    const status = await second.evaluate(async (id) => {
+      return (await fetch('/api/conversations/' + id)).status;
+    }, first.conversation.id);
+    expect(status).toBe(404);
+  } finally {
+    await other.close();
+  }
+});
+
+test('requires an explicit choice before replacing an expired workspace session', async ({
+  page,
+  context,
+}) => {
+  await context.addCookies([
+    {
+      name: 'thread_session',
+      value: 'a'.repeat(43),
+      url: 'http://127.0.0.1:3100/',
+      httpOnly: true,
+      sameSite: 'Strict',
+    },
+  ]);
+  await page.goto('/');
+  await expect(page.getByRole('alert')).toContainText('session has expired');
+  expect(await page.evaluate(() => document.cookie)).not.toContain('thread_session');
+  const newSession = page.waitForResponse(
+    (response) => response.url().endsWith('/api/session') && response.request().method() === 'POST',
+  );
+  await page.getByRole('button', { name: 'Start new workspace' }).click();
+  expect((await newSession).ok()).toBe(true);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await page.evaluate(async () => (await fetch('/api/session')).status)).toBe(200);
+});
+
 test('loads the real local shell with no provider traffic or browser errors', async ({ page }) => {
   const errors: string[] = [];
   const external: string[] = [];

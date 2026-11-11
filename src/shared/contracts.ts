@@ -5,7 +5,7 @@ export const missingSettingSchema = z.enum(['OPENAI_API_KEY', 'TAVILY_API_KEY', 
 export type MissingSetting = z.infer<typeof missingSettingSchema>;
 
 export const serviceStatusSchema = z.strictObject({
-  stage: z.literal('foundation'),
+  stage: z.enum(['foundation', 'persistence']),
   capabilities: z.strictObject({
     chat: z.literal(false),
     memory: z.literal(false),

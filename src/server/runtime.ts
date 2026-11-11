@@ -7,27 +7,36 @@ import type { Logger } from './logger.js';
 import { log } from './logger.js';
 import { createApi, finishApp } from './app.js';
 import { notFound } from './http/errors.js';
+import { openDatabase } from './storage/client.js';
 
 export async function startServer(config: Config, logger: Logger = log) {
   let ready = false;
-  const app = createApi(config, logger, () => ready);
+  const store = await openDatabase(config.databasePath);
+  const app = createApi(config, logger, () => ready, store);
   let server: ReturnType<typeof app.listen> | undefined;
   let vite: ViteDevServer | undefined;
   let closePromise: Promise<void> | undefined;
   const close = () =>
     (closePromise ??= (async () => {
-      // Close Vite's HMR sockets as well as HTTP sockets; don't hang on an open tab.
-      await vite?.close();
-      if (!server?.listening) return;
-      const listeningServer = server;
-      const force = setTimeout(() => listeningServer.closeAllConnections(), 5_000);
-      force.unref();
       try {
-        await new Promise<void>((done, reject) =>
-          listeningServer.close((error) => (error ? reject(error) : done())),
-        );
+        try {
+          await vite?.close();
+        } finally {
+          if (server?.listening) {
+            const listeningServer = server;
+            const force = setTimeout(() => listeningServer.closeAllConnections(), 5_000);
+            force.unref();
+            try {
+              await new Promise<void>((done, reject) =>
+                listeningServer.close((error) => (error ? reject(error) : done())),
+              );
+            } finally {
+              clearTimeout(force);
+            }
+          }
+        }
       } finally {
-        clearTimeout(force);
+        await store.close();
       }
     })());
   try {

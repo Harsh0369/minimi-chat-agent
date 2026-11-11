@@ -8,11 +8,14 @@ import { log } from './logger.js';
 import { attachNonce, localBoundary, securityHeaders } from './http/security.js';
 import { AppError, errorHandler, notFound, sendAppError } from './http/errors.js';
 import { serviceStatusSchema } from '../shared/contracts.js';
+import type { StorePort } from './storage/client.js';
+import { persistenceRouter } from './conversations/routes.js';
 
 export function createApi(
   config: Config,
   logger: Logger = log,
   isReady: () => boolean = () => true,
+  store?: StorePort,
 ): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -37,6 +40,18 @@ export function createApi(
   });
   app.use(attachNonce, securityHeaders(config), localBoundary(config));
   app.use((_req, res, next) => {
+    if (store && !store.available) {
+      sendAppError(
+        res,
+        logger,
+        new AppError(
+          503,
+          'DATABASE_UNAVAILABLE',
+          'Your workspace is unavailable. Restart the application.',
+        ),
+      );
+      return;
+    }
     if (!isReady()) {
       sendAppError(
         res,
@@ -60,12 +75,13 @@ export function createApi(
     const missing = missingProviderSettings(config);
     res.json(
       serviceStatusSchema.parse({
-        stage: 'foundation',
+        stage: store ? 'persistence' : 'foundation',
         capabilities: { chat: false, memory: false, webSearch: false },
         configuration: { providersConfigured: missing.length === 0, missing },
       }),
     );
   });
+  if (store) app.use('/api', persistenceRouter(store));
   return app;
 }
 

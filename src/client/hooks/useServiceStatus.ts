@@ -18,6 +18,19 @@ export function useServiceStatus() {
         });
         if (!response.ok) throw new Error('Service unavailable');
         const status = serviceStatusSchema.parse(await response.json());
+        if (status.stage === 'persistence') {
+          const session = await fetch('/api/session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+            signal: controller.signal,
+          });
+          if (session.status === 401) {
+            if (active) setConnection({ state: 'expired' });
+            return;
+          }
+          if (!session.ok) throw new Error('Workspace unavailable');
+        }
         if (active) setConnection({ state: 'ready', status });
       } catch {
         if (active) setConnection({ state: 'error' });
@@ -37,5 +50,16 @@ export function useServiceStatus() {
     setAttempt((value) => value + 1);
   };
 
-  return { connection, retry };
+  const reset = async () => {
+    setConnection({ state: 'loading' });
+    try {
+      const response = await fetch('/api/session', { method: 'DELETE' });
+      if (!response.ok) throw new Error('Could not reset workspace');
+      setAttempt((value) => value + 1);
+    } catch {
+      setConnection({ state: 'error' });
+    }
+  };
+
+  return { connection, retry, reset };
 }
