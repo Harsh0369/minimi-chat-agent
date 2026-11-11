@@ -24,30 +24,10 @@ export function Sidebar() {
           <span>History</span>
           <History size={14} aria-hidden="true" />
         </div>
-        <p className="mt-5 text-[12px] leading-6 text-muted">
-          No conversations yet.
-          <br />
-          Your next thought starts here.
-        </p>
+        <p className="mt-5 text-[12px] leading-6 text-muted">No conversations yet.</p>
       </div>
       <div className="mt-auto pt-24">
-        <div className="border-t border-line pt-5">
-          <p className="font-editorial text-[22px] leading-tight tracking-tight">
-            Keep the thread.
-          </p>
-          <p className="mt-3 text-[12px] leading-6 text-muted">
-            Questions, context, and the time between them.
-          </p>
-        </div>
-        <div className="mt-8 flex items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-full border border-line text-[11px] font-semibold">
-            HA
-          </span>
-          <div>
-            <p className="text-xs font-medium">Harsh Agarwal</p>
-            <p className="mt-0.5 text-[10px] text-muted">Built for the minimi challenge</p>
-          </div>
-        </div>
+        <p className="border-t border-line pt-5 text-[10px] text-muted">Built by Harsh Agarwal</p>
       </div>
     </aside>
   );

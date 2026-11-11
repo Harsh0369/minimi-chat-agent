@@ -14,9 +14,9 @@ export function StatusNotice({
       className="mt-7 border-t border-line pt-5 text-[11px] leading-6 text-muted"
     >
       {connection.state === 'error' ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <p>Couldn’t reach the local server. Check that it is running, then retry.</p>
-          <Button onClick={onRetry}>Retry connection</Button>
+        <div role="alert" className="flex flex-wrap items-center gap-3">
+          <p>Couldn’t load this workspace. Please try again.</p>
+          <Button onClick={onRetry}>Try again</Button>
         </div>
       ) : (
         <p>
