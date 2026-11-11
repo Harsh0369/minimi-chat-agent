@@ -12,3 +12,6 @@ logs/
 *.db-*
 *.log
 .DS_Store
+playwright-report/
+test-results/
+*.tsbuildinfo

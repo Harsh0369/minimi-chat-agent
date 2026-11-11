@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+package-lock.json
+.agents
+.codex
+.local-tools
+graft
+AGENTS.md
+data
+.env
+.env.*
