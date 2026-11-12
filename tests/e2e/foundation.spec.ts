@@ -144,6 +144,7 @@ test('keeps the composer within the viewport across layout breakpoints', async (
     );
     const composer = await page.getByRole('textbox', { name: 'Message' }).boundingBox();
     expect(composer).not.toBeNull();
+    expect(composer!.y + composer!.height).toBeLessThanOrEqual(900);
     expect(composer!.x).toBeGreaterThanOrEqual(0);
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(width);
   }
@@ -157,6 +158,8 @@ test('supports keyboard navigation to the conversation and retry control', async
   await expect(page.getByRole('link', { name: 'Skip to conversation' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('main')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Messages', { exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
   await page.unroute('**/api/status');

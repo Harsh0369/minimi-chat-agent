@@ -1,163 +1,190 @@
-import { useCallback, useEffect, useState } from 'react';
-
-type Conversation = { id: string; title: string; updatedAt: number };
-export type ChatMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  createdAt: number;
-};
-type Turn = { id: string; state: string };
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
-  if (!response.ok) {
-    const data = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
-    } | null;
-    throw new Error(data?.error?.message ?? `Request failed (${response.status})`);
-  }
-  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
-}
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  request,
+  loadMessages,
+  streamTurn,
+  type Conversation,
+  type ChatMessage,
+  type Turn,
+} from '../lib/conversations.js';
+export type { ChatMessage } from '../lib/conversations.js';
+const failed = (turn: Turn | null) =>
+  turn && ['failed', 'cancelled', 'interrupted'].includes(turn.state) ? turn.id : null;
 export function useConversations(enabled: boolean) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, select] = useState<string | null>(null);
+  const selection = useRef<string | null>(null);
+  const running = useRef<AbortController | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [failedTurn, setFailedTurn] = useState<string | null>(null);
+  const [partial, setPartial] = useState('');
+  const [progress, setProgress] = useState('');
+  const setSelected = useCallback((id: string | null) => {
+    if (selection.current === id) return;
+    running.current?.abort();
+    running.current = null;
+    selection.current = id;
+    select(id);
+    setMessages([]);
+    setPartial('');
+    setBusy(false);
+    setError(null);
+    setFailedTurn(null);
+    setLoading(Boolean(id));
+  }, []);
   const refresh = useCallback(async () => {
     const page = await request<{ items: Conversation[] }>('/api/conversations?limit=100');
     setConversations(page.items);
-    setSelected((current) =>
-      current && page.items.some((item) => item.id === current)
-        ? current
-        : (page.items[0]?.id ?? null),
-    );
+    return page.items;
   }, []);
   useEffect(() => {
-    if (enabled) void refresh().catch((cause) => setError(String(cause)));
-  }, [enabled, refresh]);
-  useEffect(() => {
-    if (!selected) {
-      setMessages([]);
-      setFailedTurn(null);
-      return;
-    }
     let active = true;
-    void request<{ items: ChatMessage[] }>(`/api/conversations/${selected}/messages?limit=100`)
-      .then((page) => {
-        if (active) setMessages(page.items);
-      })
-      .catch((cause) => {
-        if (active) setError(String(cause));
-      });
-    void request<Turn | null>(`/api/conversations/${selected}/latest-turn`)
-      .then((turn) => {
-        if (active)
-          setFailedTurn(
-            turn && ['failed', 'cancelled', 'interrupted'].includes(turn.state) ? turn.id : null,
-          );
-      })
-      .catch(() => {});
+    if (enabled)
+      void refresh()
+        .then((items) => {
+          if (active && !selection.current) setSelected(items[0]?.id ?? null);
+        })
+        .catch(() => {
+          if (active) setError('Could not load conversations.');
+        });
     return () => {
       active = false;
+    };
+  }, [enabled, refresh, setSelected]);
+  useEffect(() => () => running.current?.abort(), []);
+  useEffect(() => {
+    if (!selected) return;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const [items, turn] = await Promise.all([
+          loadMessages(selected, controller.signal),
+          request<Turn | null>(`/api/conversations/${selected}/latest-turn`, {
+            signal: controller.signal,
+          }),
+        ]);
+        if (controller.signal.aborted || running.current) return;
+        setMessages(items);
+        setFailedTurn(failed(turn));
+        setLoading(false);
+        // Recover a turn still cancelling after navigation, or running in another tab.
+        if (turn && ['pending', 'running'].includes(turn.state))
+          timer = setTimeout(() => void load(), 1000);
+      } catch {
+        if (!controller.signal.aborted) {
+          setError('Could not load this conversation.');
+          setLoading(false);
+        }
+      }
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void load();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
     };
   }, [selected]);
   const create = async () => {
     try {
-      setError(null);
-      const conversation = await request<Conversation>('/api/conversations', {
+      const chat = await request<Conversation>('/api/conversations', {
         method: 'POST',
         body: JSON.stringify({ title: 'New conversation' }),
       });
-      setConversations((items) => [conversation, ...items]);
-      setSelected(conversation.id);
-      setMessages([]);
-    } catch (cause) {
-      setError(String(cause));
+      setConversations((items) => [chat, ...items]);
+      setSelected(chat.id);
+      return chat.id;
+    } catch {
+      setError('Could not create a conversation.');
+      return null;
     }
   };
   const remove = async (id: string) => {
     try {
       await request(`/api/conversations/${id}`, { method: 'DELETE' });
       setConversations((items) => items.filter((item) => item.id !== id));
-      if (selected === id) setSelected(null);
-    } catch (cause) {
-      setError(String(cause));
+      if (selection.current === id) setSelected(null);
+    } catch {
+      setError('Could not delete this conversation.');
     }
   };
-  const send = async (text: string) => {
-    if (!selected || busy) return;
+  const run = async (id: string, path: string, body: unknown) => {
+    const controller = new AbortController();
+    running.current = controller;
     setBusy(true);
     setError(null);
     setFailedTurn(null);
-    const optimistic: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      text,
-      createdAt: Date.now(),
-    };
-    setMessages((items) => [...items, optimistic]);
+    setPartial('');
+    setProgress('Thinking…');
+    const current = () => selection.current === id && running.current === controller;
     try {
-      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      await request(`/api/conversations/${selected}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({ requestId: crypto.randomUUID(), text, timezone: zone }),
+      await streamTurn(path, body, controller.signal, (event) => {
+        if (!current()) return;
+        if (event.type === 'delta') setPartial((text) => text + event.text);
+        if (event.type === 'reset') setPartial('');
+        if (event.type === 'status') setProgress(event.message);
       });
-      const page = await request<{ items: ChatMessage[] }>(
-        `/api/conversations/${selected}/messages?limit=100`,
-      );
-      setMessages(page.items);
-      await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The answer failed.');
-      const page = await request<{ items: ChatMessage[] }>(
-        `/api/conversations/${selected}/messages?limit=100`,
-      ).catch(() => null);
-      if (page) setMessages(page.items);
-      const turn = await request<Turn | null>(`/api/conversations/${selected}/latest-turn`).catch(
-        () => null,
-      );
-      if (turn && ['failed', 'cancelled', 'interrupted'].includes(turn.state))
-        setFailedTurn(turn.id);
+      if (current() && !controller.signal.aborted)
+        setError(cause instanceof Error ? cause.message : 'The answer failed.');
     } finally {
-      setBusy(false);
+      if (current()) {
+        try {
+          const [items, turn] = await Promise.all([
+            loadMessages(id),
+            request<Turn | null>(`/api/conversations/${id}/latest-turn`),
+          ]);
+          if (current()) {
+            setMessages(items);
+            setFailedTurn(failed(turn));
+          }
+          await refresh();
+        } catch {
+          if (current()) setError('Could not reload the saved answer. Reopen this conversation.');
+        }
+        if (current()) {
+          running.current = null;
+          setBusy(false);
+          setPartial('');
+        }
+      }
     }
+  };
+  const send = async (text: string) => {
+    if (running.current || loading) return;
+    const id = selection.current ?? (await create());
+    if (!id) return;
+    setMessages((items) => [
+      ...items,
+      { id: crypto.randomUUID(), role: 'user', text, createdAt: Date.now() },
+    ]);
+    await run(id, `/api/conversations/${id}/messages`, {
+      requestId: crypto.randomUUID(),
+      text,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    });
+    setLoading(false);
   };
   const retry = async () => {
-    if (!selected || !failedTurn || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await request(`/api/conversations/${selected}/turns/${failedTurn}/retry`, {
-        method: 'POST',
-        body: JSON.stringify({ requestId: crypto.randomUUID() }),
+    if (selected && failedTurn && !running.current)
+      await run(selected, `/api/conversations/${selected}/turns/${failedTurn}/retry`, {
+        requestId: crypto.randomUUID(),
       });
-      const page = await request<{ items: ChatMessage[] }>(
-        `/api/conversations/${selected}/messages?limit=100`,
-      );
-      setMessages(page.items);
-      setFailedTurn(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Retry failed.');
-    } finally {
-      setBusy(false);
-    }
   };
   const cancel = async () => {
-    if (!selected || !busy) return;
+    const id = selection.current;
+    if (!id || !running.current) return;
     try {
-      const turn = await request<Turn | null>(`/api/conversations/${selected}/latest-turn`);
+      const turn = await request<Turn | null>(`/api/conversations/${id}/latest-turn`);
       if (turn && ['pending', 'running'].includes(turn.state))
-        await request(`/api/conversations/${selected}/turns/${turn.id}/cancel`, {
+        await request(`/api/conversations/${id}/turns/${turn.id}/cancel`, {
           method: 'POST',
           body: '{}',
         });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not cancel the answer.');
+    } catch {
+      if (selection.current === id) setError('Could not stop the answer. Try again.');
     }
   };
   return {
@@ -166,8 +193,11 @@ export function useConversations(enabled: boolean) {
     setSelected,
     messages,
     busy,
+    loading,
     error,
     failedTurn,
+    partial,
+    progress,
     create,
     remove,
     send,

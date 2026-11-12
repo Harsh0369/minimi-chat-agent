@@ -60,26 +60,27 @@ export function mentionedDay(text: string, now: number, timezone: string) {
     day = new Date(Date.UTC(+(named[3] ?? today.year), months.indexOf(named[2]!), +named[1]!));
   else if (/\byesterday\b/.test(lower))
     day = new Date(Date.UTC(today.year, today.month - 1, today.day - 1));
-  else if (/\btoday\b/.test(lower))
-    day = new Date(Date.UTC(today.year, today.month - 1, today.day));
   else {
     const match = lower.match(
-      /\b(last|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/,
+      /\b(last|this|on)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/,
     );
     if (match) {
       const current = new Date(Date.UTC(today.year, today.month - 1, today.day));
       const desired = weekdays.indexOf(match[2]!);
       let distance = (current.getUTCDay() - desired + 7) % 7;
       if (match[1] === 'last' && distance === 0) distance = 7;
-      if (match[1] === 'last' && distance < 7) distance += 7;
+
       day = new Date(current.getTime() - distance * 86400000);
     }
   }
+  if (!day && /\btoday\b/.test(lower))
+    day = new Date(Date.UTC(today.year, today.month - 1, today.day));
   if (!day || Number.isNaN(day.getTime())) return null;
   const y = day.getUTCFullYear(),
     m = day.getUTCMonth() + 1,
     d = day.getUTCDate();
   if (iso && (y !== +iso[1]! || m !== +iso[2]! || d !== +iso[3]!)) return null;
+  if (named && (m !== months.indexOf(named[2]!) + 1 || d !== +named[1]!)) return null;
   const next = new Date(Date.UTC(y, m - 1, d + 1));
   return {
     label: `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`,

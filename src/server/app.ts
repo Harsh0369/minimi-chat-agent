@@ -85,7 +85,7 @@ export function createApi(
       }),
     );
   });
-  if (store) app.use('/api', persistenceRouter(store, Date.now, config));
+  if (store) app.use('/api', persistenceRouter(store, Date.now, config, logger));
   return app;
 }
 

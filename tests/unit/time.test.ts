@@ -22,3 +22,26 @@ describe('dated memory boundaries', () => {
     expect(mentionedDay('2026-02-30', Date.UTC(2026, 2, 11), 'UTC')).toBeNull();
   });
 });
+
+it('uses the most recent last Tuesday even when today is also mentioned', () => {
+  expect(
+    mentionedDay(
+      'Last Tuesday I asked about Postgres. Is that correct today?',
+      Date.UTC(2026, 10, 11),
+      'UTC',
+    )?.label,
+  ).toBe('2026-11-10');
+});
+it('finds the Monday shortlist in the challenge wording', () => {
+  expect(
+    mentionedDay(
+      'On Monday we shortlisted five CRM tools. What changed?',
+      Date.UTC(2026, 10, 11),
+      'UTC',
+    )?.label,
+  ).toBe('2026-11-09');
+});
+it('rejects invalid named dates and resolves same-weekday last to a week ago', () => {
+  expect(mentionedDay('31 February', Date.UTC(2026, 10, 11), 'UTC')).toBeNull();
+  expect(mentionedDay('last Wednesday', Date.UTC(2026, 10, 11), 'UTC')?.label).toBe('2026-11-04');
+});

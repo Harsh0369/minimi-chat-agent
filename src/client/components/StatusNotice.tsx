@@ -10,6 +10,11 @@ export function StatusNotice({
   onRetry: () => void;
   onReset: () => void;
 }) {
+  if (
+    connection.state === 'loading' ||
+    (connection.state === 'ready' && connection.status.capabilities.chat)
+  )
+    return null;
   return (
     <div
       id="preview-note"
@@ -32,12 +37,7 @@ export function StatusNotice({
         <p>
           Set GEMINI_API_KEY and TAVILY_API_KEY in .env, then restart the server to enable chat.
         </p>
-      ) : (
-        <p>
-          Conversations are stored on this computer. Search and model requests use your configured
-          providers.
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

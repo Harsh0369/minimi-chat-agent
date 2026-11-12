@@ -24,7 +24,7 @@ export function sendAppError(res: Response, logger: Logger, error: AppError): vo
   res.status(error.status).json({ error: { code: error.code, message: error.message, requestId } });
 }
 
-function publicError(error: unknown): AppError {
+export function publicError(error: unknown): AppError {
   if (error instanceof AppError) return error;
   if (error instanceof StoreError) {
     const mapped: Record<string, [number, string]> = {

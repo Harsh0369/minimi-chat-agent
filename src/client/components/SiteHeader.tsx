@@ -1,16 +1,24 @@
-import { Brand } from './Brand.js';
-
-export function SiteHeader() {
+import { Menu } from 'lucide-react';
+export function SiteHeader({
+  title,
+  onMenu,
+  menuOpen,
+}: {
+  title: string;
+  onMenu: () => void;
+  menuOpen: boolean;
+}) {
   return (
-    <header className="flex min-h-[80px] items-center justify-between gap-4 border-b border-line px-6 sm:px-12">
-      <div className="lg:hidden">
-        <Brand />
-      </div>
-      <div className="hidden items-center gap-3 text-xs lg:flex">
-        <span className="text-muted">Workspace</span>
-        <span className="text-line">/</span>
-        <span>Your conversation</span>
-      </div>
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line px-4 sm:px-8">
+      <button
+        onClick={onMenu}
+        aria-label="Open conversations"
+        aria-expanded={menuOpen}
+        className="grid size-10 shrink-0 place-items-center rounded-lg hover:bg-panel lg:hidden"
+      >
+        <Menu size={20} />
+      </button>
+      <span className="truncate text-sm text-muted">{title}</span>
     </header>
   );
 }

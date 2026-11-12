@@ -1,111 +1,169 @@
-import { useState, type FormEvent } from 'react';
-import { ArrowUp, Globe } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ArrowUp, ArrowDown, Square } from 'lucide-react';
 import type { ChatMessage } from '../hooks/useConversations.js';
-
-function Text({ value }: { value: string }) {
-  return (
-    <div className="whitespace-pre-wrap break-words">
-      {value.split(/(https:\/\/[^\s)]+)/g).map((piece, index) =>
-        piece.startsWith('https://') ? (
-          <a
-            key={index}
-            href={piece}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline"
-          >
-            {piece}
-          </a>
-        ) : (
-          piece
-        ),
-      )}
-    </div>
-  );
-}
+import { MessageText } from './MessageText.js';
 export function PreviewConversation({
   messages,
   onSend,
   busy,
   enabled,
   onCancel,
+  partial,
+  progress,
+  loading,
 }: {
   messages: ChatMessage[];
   onSend: (text: string) => Promise<void>;
   busy: boolean;
   enabled: boolean;
   onCancel: () => void;
+  partial: string;
+  progress: string;
+  loading: boolean;
 }) {
   const [draft, setDraft] = useState('');
+  const [showLatest, setShowLatest] = useState(false);
+  const viewport = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const following = useRef(true);
+  const jump = () => {
+    const node = viewport.current;
+    if (node) node.scrollTop = node.scrollHeight;
+    following.current = true;
+    setShowLatest(false);
+  };
+  useEffect(() => {
+    if (following.current) jump();
+  }, [messages, partial, progress]);
+  useEffect(() => {
+    const node = input.current;
+    if (node) {
+      node.style.height = 'auto';
+      node.style.height = `${Math.min(node.scrollHeight, 160)}px`;
+    }
+  }, [draft]);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !enabled || busy) return;
     setDraft('');
+    following.current = true;
     void onSend(text);
   };
   return (
-    <section aria-labelledby="conversation-heading" className="mt-8 flex min-h-0 flex-1 flex-col">
-      <h2 id="conversation-heading" className="mb-4 text-xs font-medium">
-        Your conversation
-      </h2>
+    <section aria-label="Your conversation" className="relative flex min-h-0 flex-1 flex-col">
       <div
-        aria-live="polite"
-        className="flex max-h-[55vh] min-h-[160px] flex-col gap-5 overflow-y-auto pb-6"
+        ref={viewport}
+        data-testid="transcript"
+        tabIndex={0}
+        aria-label="Messages"
+        onScroll={() => {
+          const node = viewport.current;
+          if (node) {
+            following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+            setShowLatest(!following.current);
+          }
+        }}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-6 [scrollbar-width:thin]"
       >
-        {!messages.length && (
-          <p className="text-sm leading-7 text-muted">
-            Ask a question, revisit an earlier conversation, or check what has changed on the web.
+        {loading && !messages.length ? (
+          <p role="status" className="text-sm text-muted">
+            Loading conversation…
           </p>
-        )}
-        {messages.map((message) => (
-          <article
-            key={message.id}
-            className={`max-w-[90%] rounded-2xl px-5 py-4 text-sm leading-7 ${message.role === 'user' ? 'ml-auto bg-ink text-white' : 'border border-line bg-surface text-ink'}`}
-          >
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider opacity-60">
-              {message.role === 'user' ? 'You' : 'Assistant'}
-            </span>
-            <Text value={message.text} />
-          </article>
-        ))}
-        {busy && (
-          <div role="status" className="flex items-center gap-4 text-xs text-muted">
-            <span>Researching your question…</span>
-            <button type="button" onClick={onCancel} className="text-accent underline">
-              Cancel
-            </button>
+        ) : !messages.length && !busy ? (
+          <div className="flex min-h-full flex-col justify-center py-10 sm:pl-6">
+            <h1 className="max-w-xl font-editorial text-[42px] leading-[1.08] tracking-[-0.045em] sm:text-[60px]">
+              Pick up where
+              <br />
+              you left off.
+            </h1>
+            <p className="mt-5 text-sm leading-7 text-muted">What would you like to explore?</p>
           </div>
-        )}
+        ) : null}
+        <div className="flex flex-col gap-7 px-1">
+          {messages.map((message) => (
+            <article
+              key={message.id}
+              aria-label={message.role === 'user' ? 'Your message' : 'Assistant message'}
+              className={
+                message.role === 'user'
+                  ? 'ml-auto max-w-[90%] rounded-2xl bg-ink px-4 py-3 text-sm leading-7 whitespace-pre-wrap break-words text-white sm:max-w-[80%]'
+                  : 'min-w-0 text-[15px] leading-7 text-ink'
+              }
+            >
+              {message.role === 'user' ? message.text : <MessageText text={message.text} />}
+            </article>
+          ))}
+          {busy && partial && (
+            <article aria-label="Answer in progress" className="min-w-0 text-[15px] leading-7">
+              <MessageText text={partial} />
+            </article>
+          )}
+          {busy && (
+            <p role="status" className="text-xs text-muted">
+              {partial ? 'Writing…' : progress}
+            </p>
+          )}
+        </div>
       </div>
+      {showLatest && (
+        <button
+          onClick={jump}
+          aria-label="Jump to latest message"
+          className="absolute right-3 bottom-32 grid size-10 place-items-center rounded-full border border-line bg-surface shadow-sm"
+        >
+          <ArrowDown size={18} />
+        </button>
+      )}
       <form
         onSubmit={submit}
-        className="mt-auto rounded-2xl border border-line bg-surface p-4 shadow-[0_6px_30px_-16px_rgba(41,44,48,0.2)]"
+        className="shrink-0 rounded-2xl border border-line bg-surface p-3 shadow-[0_6px_30px_-16px_rgba(41,44,48,0.2)] sm:p-4"
       >
         <label htmlFor="message" className="sr-only">
           Message
         </label>
         <textarea
+          ref={input}
           id="message"
-          rows={3}
+          rows={1}
+          maxLength={16000}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          disabled={!enabled || busy}
-          placeholder={enabled ? 'Ask anything…' : 'Configure Gemini and Tavily keys to start'}
-          className="block w-full resize-none border-0 bg-transparent text-[15px] leading-7 text-ink outline-none placeholder:text-muted disabled:cursor-not-allowed"
+          onKeyDown={(event) => {
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing &&
+              !window.matchMedia('(pointer: coarse)').matches
+            ) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          disabled={!enabled}
+          placeholder="Ask anything…"
+          className="block max-h-40 min-h-7 w-full resize-none border-0 bg-transparent px-1 text-base leading-7 outline-none placeholder:text-muted disabled:cursor-not-allowed"
         />
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-4">
-          <span className="flex items-center gap-2 text-[11px] text-muted">
-            <Globe size={14} /> Web search &amp; memory
-          </span>
-          <button
-            type="submit"
-            disabled={!enabled || busy || !draft.trim()}
-            aria-label="Send message"
-            className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-white disabled:cursor-not-allowed disabled:bg-accent-soft disabled:text-accent"
-          >
-            <ArrowUp size={19} />
-          </button>
+        <div className="mt-2 flex items-center justify-end">
+          {busy ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              aria-label="Stop response"
+              className="grid size-10 place-items-center rounded-xl bg-ink text-white"
+            >
+              <Square size={15} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!enabled || !draft.trim()}
+              aria-label="Send message"
+              className="grid size-10 place-items-center rounded-xl bg-accent text-white disabled:bg-accent-soft disabled:text-accent"
+            >
+              <ArrowUp size={20} />
+            </button>
+          )}
         </div>
       </form>
     </section>

@@ -5,6 +5,7 @@ import { mentionedDay } from './time.js';
 import { generate, type ModelContent } from './model.js';
 import { webSearch, type SearchResult } from './search.js';
 import { semanticRecall } from './semantic.js';
+import type { EmitEvent } from '../../shared/stream.js';
 
 const searchArgs = z.object({ query: z.string().trim().min(2).max(250) });
 type Memory = {
@@ -40,7 +41,9 @@ export async function answer(
   timezone: string,
   now: number,
   signal: AbortSignal,
+  emit?: EmitEvent,
 ) {
+  await emit?.({ type: 'status', message: 'Reading conversation…' });
   if (!config.geminiApiKey || !config.tavilyApiKey) throw new Error('PROVIDER_NOT_CONFIGURED');
   const day = mentionedDay(question, now, timezone);
   const [recent, matched, datedRows, thread] = await Promise.all([
@@ -115,19 +118,37 @@ export async function answer(
   let searches = 0;
   for (let step = 0; step < 4; step++) {
     if (signal.aborted) throw new Error('CANCELLED');
-    const parts = await generate(config.geminiApiKey, config.chatModel, system, contents, signal);
+    await emit?.({ type: 'reset' });
+    await emit?.({ type: 'status', message: 'Thinking…' });
+    const parts = await generate(
+      config.geminiApiKey,
+      config.chatModel,
+      system,
+      contents,
+      signal,
+      emit
+        ? async (text) => {
+            await emit({ type: 'delta', text });
+          }
+        : undefined,
+    );
+    if (parts.some((item) => item.functionCall && item.functionCall.name !== 'web_search'))
+      throw new Error('UNKNOWN_TOOL');
     const calls = parts.flatMap((item) =>
       item.functionCall?.name === 'web_search' ? [item.functionCall] : [],
     );
     if (!calls.length) {
       text = parts
         .map((item) => (item.thought ? '' : (item.text ?? '')))
-        .join('\n')
+        .join('')
         .trim();
       break;
     }
     if (step === 3 || searches + calls.length > 4) throw new Error('SEARCH_BUDGET_EXCEEDED');
     const queries = calls.map((call) => searchArgs.parse(call.args).query);
+    // A model can emit a preamble before calling its tool; it is not a completed answer.
+    await emit?.({ type: 'reset' });
+    await emit?.({ type: 'status', message: 'Searching the web…' });
     const batches = await Promise.all(
       queries.map((query) => webSearch(config.tavilyApiKey!, query, signal)),
     );
