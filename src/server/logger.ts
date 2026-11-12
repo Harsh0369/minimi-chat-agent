@@ -12,6 +12,18 @@ export type LogEvent =
   | { event: 'server_stopped' }
   | { event: 'startup_error'; code: string }
   | { event: 'model_call_timing'; elapsedMs: number; outcome: 'ok' | 'error' }
-  | { event: 'web_search_timing'; elapsedMs: number; outcome: 'ok' | 'error'; resultCount: number };
+  | {
+      event: 'model_call_debug';
+      name: string;
+      status: number | null;
+      code: string;
+      category: string;
+    }
+  | { event: 'web_search_timing'; elapsedMs: number; outcome: 'ok' | 'error'; resultCount: number }
+  | { event: 'agent_failure_debug'; code: string; status: number | null }
+  | {
+      event: 'evidence_review_debug';
+      reason: 'invalid_json' | 'no_citation' | 'amount_mismatch' | 'model_error';
+    };
 export type Logger = (event: LogEvent) => void;
 export const log: Logger = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);

@@ -46,21 +46,25 @@ export async function runAnswerWorkflow(
       signal.throwIfAborted();
       await emit?.({ type: 'reset' });
       await emit?.({ type: 'status', message: 'Thinking…' });
+      const canSearch =
+        webAllowed && state.step < (provider === 'groq' ? 2 : 3) && state.searches < MAX_SEARCHES;
       const parts = await modelGenerate(
         key,
         model,
-        system,
+        canSearch
+          ? system
+          : `${system} The search phase is complete. Produce the final answer now from the supplied evidence. Do not request another search or emit a tool call.`,
         state.contents,
         signal,
         emit ? async (text) => emit({ type: 'delta', text }) : undefined,
-        webAllowed ? undefined : { tools: false },
+        canSearch ? undefined : { tools: false },
       );
       if (parts.some((part) => part.functionCall && part.functionCall.name !== 'web_search'))
         throw new Error('UNKNOWN_TOOL');
       const calls = parts.flatMap((part) =>
         part.functionCall?.name === 'web_search' ? [part.functionCall] : [],
       );
-      if (!webAllowed && calls.length) throw new Error('SEARCH_NOT_ALLOWED_FOR_LOCAL_ANSWER');
+      if (!canSearch && calls.length) throw new Error('SEARCH_NOT_ALLOWED_FOR_LOCAL_ANSWER');
       if (calls.length && (state.step >= 3 || state.searches + calls.length > MAX_SEARCHES))
         throw new Error('SEARCH_BUDGET_EXCEEDED');
       return {

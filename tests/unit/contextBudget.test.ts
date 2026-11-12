@@ -46,8 +46,8 @@ describe('provider context budgets', () => {
       observedAt: '2026-11-12T00:00:00Z',
     }));
     expect(selectSearchResults(sources, 'groq', true)).toHaveLength(1);
-    expect(selectSearchResults(sources, 'groq', false)).toHaveLength(2);
-    expect(selectSearchResults(sources, 'groq', true)[0]?.excerpt).toHaveLength(300);
+    expect(selectSearchResults(sources, 'groq', false)).toHaveLength(3);
+    expect(selectSearchResults(sources, 'groq', true)[0]?.excerpt).toHaveLength(260);
     expect(selectSearchResults(sources, 'gemini', true)).toHaveLength(5);
   });
 });

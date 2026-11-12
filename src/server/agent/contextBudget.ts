@@ -87,8 +87,8 @@ export function selectSearchResults(
   prefetched: boolean,
 ) {
   if (provider !== 'groq') return results;
-  return results.slice(0, prefetched ? 1 : 2).map((source) => ({
+  return results.slice(0, prefetched ? 1 : 3).map((source) => ({
     ...source,
-    excerpt: sliceBytes(source.excerpt, 300),
+    excerpt: sliceBytes(source.excerpt, 260),
   }));
 }

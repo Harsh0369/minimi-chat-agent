@@ -132,6 +132,41 @@ describe('model provider boundary', () => {
     expect(result).toEqual([{ text: 'Hello' }]);
     expect(state.calls[0]?.model).toBe('test-openai-model');
   });
+  it('turns prior tool traffic into plain evidence when tools are disabled', async () => {
+    state.calls.length = 0;
+    const generate = createGenerate(
+      readConfig({ MODEL_PROVIDER: 'groq', GROQ_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture' }),
+    );
+    await generate(
+      '',
+      '',
+      'Answer from evidence without tools',
+      [
+        { role: 'user', parts: [{ text: 'Check a price' }] },
+        {
+          role: 'model',
+          parts: [{ functionCall: { id: 'call-1', name: 'web_search', args: { query: 'price' } } }],
+        },
+        {
+          role: 'user',
+          parts: [
+            { functionResponse: { id: 'call-1', name: 'web_search', response: { results: [] } } },
+          ],
+        },
+      ],
+      new AbortController().signal,
+      undefined,
+      { tools: false },
+    );
+    const messages = state.calls[0]!.messages as Array<{
+      tool_calls?: unknown;
+      tool_call_id?: unknown;
+      content: unknown;
+    }>;
+    expect(messages).toHaveLength(3);
+    expect(messages.every((message) => !message.tool_calls && !message.tool_call_id)).toBe(true);
+    expect(String(messages[2]?.content)).toContain('Previous web_search result');
+  });
   it('reassembles a streamed Groq tool call before executing search', async () => {
     const generate = createGenerate(
       readConfig({ MODEL_PROVIDER: 'groq', GROQ_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture' }),

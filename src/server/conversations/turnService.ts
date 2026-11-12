@@ -5,6 +5,7 @@ import type { EmitEvent } from '../../shared/stream.js';
 import { AppError } from '../http/errors.js';
 import { answer } from '../agent/service.js';
 import { indexPendingMemory } from '../agent/semantic.js';
+import { log } from '../logger.js';
 
 export function createTurnService(store: StorePort, clock: () => number, config?: Config) {
   const active = new Map<string, AbortController>();
@@ -76,6 +77,16 @@ export function createTurnService(store: StorePort, clock: () => number, config?
       }
       return completed;
     } catch (error) {
+      if (process.env.PERF_LOG === '1') {
+        const rawStatus =
+          typeof error === 'object' && error !== null && 'status' in error ? error.status : null;
+        const rawCode = error instanceof Error ? error.message : '';
+        log({
+          event: 'agent_failure_debug',
+          code: /^[A-Z][A-Z0-9_]{2,50}$/.test(rawCode) ? rawCode : 'UPSTREAM_OR_UNKNOWN',
+          status: typeof rawStatus === 'number' ? rawStatus : null,
+        });
+      }
       try {
         await store.call(
           'stopTurn',

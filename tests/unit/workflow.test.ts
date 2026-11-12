@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runAnswerWorkflow } from '../../src/server/agent/workflow.js';
+import type { generate } from '../../src/server/agent/model.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -266,5 +267,45 @@ describe('answer workflow', () => {
     );
     expect(result.text).toContain('Beta could not be verified');
     expect(result.sources).toHaveLength(1);
+  });
+  it('forces a Groq answer after two search rounds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          results: [
+            {
+              title: 'Official pricing',
+              url: 'https://example.com/pricing',
+              content: 'The plan is usage based.',
+            },
+          ],
+        }),
+      ),
+    );
+    const toolOptions: Array<boolean | undefined> = [];
+    let calls = 0;
+    const model = vi.fn(async (_key, _model, _system, _contents, _signal, _onText, options) => {
+      toolOptions.push(options?.tools);
+      calls++;
+      return calls <= 2
+        ? [{ functionCall: { name: 'web_search', args: { query: `official plan ${calls}` } } }]
+        : [{ text: 'The plan is usage based [S1].' }];
+    }) as unknown as typeof generate;
+    const result = await runAnswerWorkflow(
+      'key',
+      'model',
+      'Answer from evidence.',
+      [{ role: 'user', parts: [{ text: 'Current plan?' }] }],
+      [],
+      0,
+      'search-key',
+      new AbortController().signal,
+      undefined,
+      model,
+      'groq',
+    );
+    expect(toolOptions).toEqual([undefined, undefined, false]);
+    expect(result.text).toContain('[S1]');
   });
 });
