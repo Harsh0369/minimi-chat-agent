@@ -10,6 +10,14 @@ const routeSchema = z.object({
   answerBasis: z.enum(['CLOCK', 'MEMORY', 'EXTERNAL', 'GENERAL']).default('GENERAL'),
 });
 export type ContextRoute = z.infer<typeof routeSchema>;
+// A fresh, self-contained question has no active-thread ambiguity. Keep the
+// model router for references to past interactions and clock-sensitive asks.
+export function needsContextRouting(question: string, thread: ConversationTurn[]) {
+  if (thread.length) return true;
+  return /\b(?:i|we|my|our|remember|recall|earlier|previous|before|last|shortlist|discussed|date|time|timezone|today|tomorrow|yesterday)\b/i.test(
+    question,
+  );
+}
 const threadOnly: ContextRoute = {
   scope: 'THREAD',
   needsClock: false,

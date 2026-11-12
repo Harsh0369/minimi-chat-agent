@@ -9,7 +9,7 @@ import { missingComparisonCoverage, type ComparisonCoverage } from './coverage.j
 
 const searchArgs = z.object({ query: z.string().trim().min(2).max(250) });
 const MAX_SEARCHES = 12;
-const MAX_SEARCH_CONCURRENCY = 3;
+const MAX_SEARCH_CONCURRENCY = 5;
 type Parts = Awaited<ReturnType<typeof generate>>;
 type ToolCall = NonNullable<Parts[number]['functionCall']>;
 

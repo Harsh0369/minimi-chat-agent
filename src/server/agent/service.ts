@@ -9,7 +9,7 @@ import type { EmitEvent } from '../../shared/stream.js';
 import { comparisonPlan, inferComparisonPlan } from './comparison.js';
 import { marketContext, marketSearchPlan } from './market.js';
 import { locationClarification } from './location.js';
-import { clockFacts, routeContext, type ContextRoute } from './context.js';
+import { clockFacts, needsContextRouting, routeContext, type ContextRoute } from './context.js';
 import { runAnswerWorkflow } from './workflow.js';
 import { createGenerate } from './providers.js';
 import { packMemorySections, selectSearchResults, type MemoryRecord } from './contextBudget.js';
@@ -21,9 +21,10 @@ import {
   supportedAmounts,
 } from './comparisonAnswer.js';
 import { answerFromHistory } from './historyAnswer.js';
+import { log } from '../logger.js';
 
 const MAX_SEARCHES = 12;
-const MAX_SEARCH_CONCURRENCY = 3;
+const MAX_SEARCH_CONCURRENCY = 5;
 export async function answer(
   config: Config,
   store: StorePort,
@@ -38,7 +39,23 @@ export async function answer(
 ) {
   await emit?.({ type: 'status', message: 'Reading conversation…' });
   if (missingProviderSettings(config).length) throw new Error('PROVIDER_NOT_CONFIGURED');
-  const modelGenerate = createGenerate(config);
+  const baseGenerate = createGenerate(config);
+  const modelGenerate: typeof generate = async (...args) => {
+    const started = performance.now();
+    let outcome: 'ok' | 'error' = 'error';
+    try {
+      const result = await baseGenerate(...args);
+      outcome = 'ok';
+      return result;
+    } finally {
+      if (process.env.PERF_LOG === '1')
+        log({
+          event: 'model_call_timing',
+          elapsedMs: Math.round(performance.now() - started),
+          outcome,
+        });
+    }
+  };
   const thread = await store.call('recentThread', ownerId, conversationId, 30);
   const priorThread = thread.filter((item) => item.id !== currentMessageId);
   const locationQuestion = locationClarification(question, priorThread);
@@ -50,19 +67,21 @@ export async function answer(
     webPolicy: 'ALLOW',
     answerBasis: 'GENERAL',
   };
-  try {
-    route = await routeContext(
-      config.geminiApiKey ?? '',
-      config.chatModel,
-      question,
-      priorThread,
-      timezone,
-      AbortSignal.any([signal, AbortSignal.timeout(7000)]),
-      modelGenerate,
-    );
-  } catch (error) {
-    if (signal.aborted) throw error;
-    // An unavailable router must not introduce unrelated cross-chat content.
+  if (needsContextRouting(question, priorThread)) {
+    try {
+      route = await routeContext(
+        config.geminiApiKey ?? '',
+        config.chatModel,
+        question,
+        priorThread,
+        timezone,
+        AbortSignal.any([signal, AbortSignal.timeout(7000)]),
+        modelGenerate,
+      );
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // An unavailable router must not introduce unrelated cross-chat content.
+    }
   }
   const recall = route.scope === 'WORKSPACE';
   const currentClock = clockFacts(now, timezone, route);

@@ -3,6 +3,7 @@ import { ArrowUp, ArrowDown, Square, Copy, Check, Pencil } from 'lucide-react';
 import type { ChatMessage } from '../hooks/useConversations.js';
 import { MessageText } from './MessageText.js';
 import { SourceList } from './SourceList.js';
+import { formatLocalTime } from '../lib/time.js';
 export function PreviewConversation({
   messages,
   onSend,
@@ -258,31 +259,40 @@ export function PreviewConversation({
                 )}
               </article>
               {editingId !== message.id && (
-                <div className="mt-1 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                  <button
-                    type="button"
-                    onClick={() => void copyMessage(message)}
-                    aria-label={copiedId === message.id ? 'Copied' : 'Copy message'}
-                    title={copiedId === message.id ? 'Copied' : 'Copy'}
-                    className="grid size-8 cursor-pointer place-items-center rounded-lg text-muted hover:bg-accent-soft hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
+                <div className="mt-1 flex min-h-8 items-center gap-1">
+                  <time
+                    dateTime={new Date(message.createdAt).toISOString()}
+                    title={new Date(message.createdAt).toLocaleString()}
+                    className="px-1 text-[11px] text-muted"
                   >
-                    {copiedId === message.id ? <Check size={16} /> : <Copy size={16} />}
-                  </button>
-                  {message.role === 'user' && (
+                    {formatLocalTime(message.createdAt)}
+                  </time>
+                  <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
                     <button
                       type="button"
-                      disabled={busy || !enabled}
-                      onClick={() => {
-                        setEditingId(message.id);
-                        setEditDraft(message.text);
-                      }}
-                      aria-label="Edit message"
-                      title="Edit message"
-                      className="grid size-8 cursor-pointer place-items-center rounded-lg text-muted hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-accent"
+                      onClick={() => void copyMessage(message)}
+                      aria-label={copiedId === message.id ? 'Copied' : 'Copy message'}
+                      title={copiedId === message.id ? 'Copied' : 'Copy'}
+                      className="grid size-8 cursor-pointer place-items-center rounded-lg text-muted hover:bg-accent-soft hover:text-ink focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
                     >
-                      <Pencil size={16} />
+                      {copiedId === message.id ? <Check size={16} /> : <Copy size={16} />}
                     </button>
-                  )}
+                    {message.role === 'user' && (
+                      <button
+                        type="button"
+                        disabled={busy || !enabled}
+                        onClick={() => {
+                          setEditingId(message.id);
+                          setEditDraft(message.text);
+                        }}
+                        aria-label="Edit message"
+                        title="Edit message"
+                        className="grid size-8 cursor-pointer place-items-center rounded-lg text-muted hover:bg-accent-soft hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -348,7 +358,7 @@ export function PreviewConversation({
               type="button"
               onClick={onCancel}
               aria-label="Stop response"
-              className="grid size-10 place-items-center rounded-xl bg-ink text-white"
+              className="grid size-10 cursor-pointer place-items-center rounded-xl bg-ink text-white"
             >
               <Square size={15} fill="currentColor" />
             </button>
@@ -357,7 +367,7 @@ export function PreviewConversation({
               type="submit"
               disabled={!enabled || !draft.trim()}
               aria-label="Send message"
-              className="grid size-10 place-items-center rounded-xl bg-accent text-white disabled:bg-accent-soft disabled:text-accent"
+              className="grid size-10 cursor-pointer place-items-center rounded-xl bg-accent text-white disabled:bg-accent-soft disabled:text-accent"
             >
               <ArrowUp size={20} />
             </button>

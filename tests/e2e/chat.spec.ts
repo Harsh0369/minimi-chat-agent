@@ -45,6 +45,9 @@ test('copies answers and edits a question before regenerating its dependent repl
     });
   });
   await page.goto('/');
+  await expect(page.locator('[data-message-id="first"]').locator('..').locator('time')).toHaveText(
+    /^\d{1,2}:\d{2}(?:am|pm)$/,
+  );
   await page
     .locator('[data-message-id="answer"]')
     .locator('..')

@@ -480,7 +480,7 @@ describe('agent execution', () => {
     expect(result.citations.map((item) => item.url)).toEqual(['https://example.com/pricing']);
     f.store.close();
   });
-  it('covers ten independent vendor checks with at most three searches in flight', async () => {
+  it('covers ten independent vendor checks with at most five searches in flight', async () => {
     const f = fixture();
     const shortlist = f.store.operations.createConversation(f.owner, 'CRM shortlist', now);
     f.store.operations.beginTurn(
@@ -615,7 +615,7 @@ describe('agent execution', () => {
       );
       expect(modelCalls).toBe(0);
       expect(searches).toBe(10);
-      expect(peak).toBeLessThanOrEqual(3);
+      expect(peak).toBeLessThanOrEqual(5);
       expect(result.citations).toHaveLength(10);
     } finally {
       f.store.close();

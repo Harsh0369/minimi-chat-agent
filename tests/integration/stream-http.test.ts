@@ -102,7 +102,7 @@ it('streams over HTTP before completion, then persists and replays an idempotent
   expect(await (await api(`/conversations/${conversation}/messages`, input)).json()).toMatchObject({
     state: 'completed',
   });
-  expect(provider).toHaveBeenCalledTimes(2);
+  expect(provider).toHaveBeenCalledTimes(1);
 });
 it('authorizes cancellation, aborts the provider, and retries without duplicating the question', async () => {
   let providerSignal!: AbortSignal;
