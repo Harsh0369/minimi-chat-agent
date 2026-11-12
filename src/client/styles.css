@@ -16,6 +16,9 @@
   a {
     -webkit-tap-highlight-color: transparent;
   }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
   :focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 4px;
