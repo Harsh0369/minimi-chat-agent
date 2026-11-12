@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { migrate } from './migrations.ts';
 import { StoreError } from './errors.ts';
 import { submitMessageSchema } from '../../shared/contracts.ts';
+import { isPlaceholderTitle, suggestedTitle } from '../conversations/title.ts';
 
 export type Session = { ownerId: string; expiresAt: number };
 export type Conversation = {
@@ -21,6 +22,22 @@ export type Message = {
   createdAt: number;
   timezone: string;
   sequence: number;
+  sources?: Array<{
+    id: string;
+    title: string;
+    url: string;
+    excerpt: string;
+    published: string | null;
+    observedAt: string;
+  }>;
+};
+type IndexedMemory = {
+  id: string;
+  role: string;
+  text: string;
+  createdAt: number;
+  timezone: string;
+  conversationTitle: string;
 };
 export type Turn = {
   id: string;
@@ -130,11 +147,12 @@ export function createStore(path: string, now = Date.now()) {
     const id = randomUUID();
     const messageId =
       existingMessage ?? addMessage(conversationId, 'user', valid.text, valid.timezone, at);
-    if (!existingMessage)
-      db.prepare("UPDATE conversations SET title=? WHERE id=? AND title='New conversation'").run(
-        valid.text.trim().slice(0, 80),
-        conversationId,
-      );
+    if (!existingMessage) {
+      const conversation = owned(ownerId, conversationId);
+      const title = suggestedTitle(valid.text);
+      if (title && isPlaceholderTitle(conversation.title))
+        db.prepare('UPDATE conversations SET title=? WHERE id=?').run(title, conversationId);
+    }
     db.prepare(
       "INSERT INTO turns(id,conversation_id,request_id,request_hash,user_message_id,retry_of,state,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',?,?)",
     ).run(id, conversationId, valid.requestId, requestHash, messageId, retryOf, at, at);
@@ -190,7 +208,35 @@ export function createStore(path: string, now = Date.now()) {
           `SELECT ${messageColumns} FROM messages WHERE conversation_id=? AND sequence>? ORDER BY sequence LIMIT ?`,
         )
         .all(conversationId, after, limit + 1) as Message[];
-      return { items: rows.slice(0, limit), hasMore: rows.length > limit };
+      const items = rows.slice(0, limit);
+      const assistantIds = items.filter((row) => row.role === 'assistant').map((row) => row.id);
+      if (assistantIds.length) {
+        const sources = db
+          .prepare(
+            `SELECT t.assistant_message_id AS messageId, s.source_id AS id, s.title, s.url,
+              s.excerpt, s.published_at AS published, s.observed_at AS observedAt
+             FROM turn_sources s JOIN turns t ON t.id=s.turn_id
+             WHERE t.conversation_id=? AND t.assistant_message_id IN (${assistantIds.map(() => '?').join(',')})
+             ORDER BY s.rowid`,
+          )
+          .all(conversationId, ...assistantIds) as Array<
+          NonNullable<Message['sources']>[number] & { messageId: string }
+        >;
+        const byMessage = new Map(items.map((row) => [row.id, row]));
+        for (const source of sources) {
+          const message = byMessage.get(source.messageId);
+          if (message)
+            (message.sources ??= []).push({
+              id: source.id,
+              title: source.title,
+              url: source.url,
+              excerpt: source.excerpt,
+              published: source.published,
+              observedAt: source.observedAt,
+            });
+        }
+      }
+      return { items, hasMore: rows.length > limit };
     },
     recentThread(ownerId: string, conversationId: string, limit: number) {
       owned(ownerId, conversationId);
@@ -216,6 +262,83 @@ export function createStore(path: string, now = Date.now()) {
         timezone: string;
         conversationTitle: string;
       }>;
+    },
+    pendingEmbeddingTexts(ownerId: string, model: string, limit: number) {
+      if (!model || !Number.isInteger(limit) || limit < 1 || limit > 60)
+        throw new StoreError('INVALID_INPUT');
+      return db
+        .prepare(
+          `SELECT m.id,m.text FROM messages m JOIN conversations c ON c.id=m.conversation_id
+           LEFT JOIN message_embeddings e ON e.message_id=m.id AND e.model=?
+           WHERE c.owner_id=? AND e.message_id IS NULL ORDER BY m.sequence LIMIT ?`,
+        )
+        .all(model, ownerId, limit) as Array<{ id: string; text: string }>;
+    },
+    saveEmbeddings(ownerId: string, model: string, items: Array<{ id: string; vector: number[] }>) {
+      if (!model || items.length > 60) throw new StoreError('INVALID_INPUT');
+      return db
+        .transaction(() => {
+          const ownedMessage = db.prepare(
+            `SELECT 1 FROM messages m JOIN conversations c ON c.id=m.conversation_id
+             WHERE m.id=? AND c.owner_id=?`,
+          );
+          const insert = db.prepare(
+            'INSERT OR REPLACE INTO message_embeddings(message_id,model,vector) VALUES(?,?,?)',
+          );
+          for (const item of items) {
+            if (!ownedMessage.get(item.id, ownerId)) throw new StoreError('NOT_FOUND');
+            if (item.vector.length !== 768 || item.vector.some((value) => !Number.isFinite(value)))
+              throw new StoreError('INVALID_INPUT');
+            const vector = Buffer.allocUnsafe(768 * 4);
+            item.vector.forEach((value, index) => vector.writeFloatLE(value, index * 4));
+            insert.run(item.id, model, vector);
+          }
+          return items.length;
+        })
+        .immediate();
+    },
+    semanticMemory(
+      ownerId: string,
+      model: string,
+      vector: number[],
+      limit: number,
+      excludeMessageId: string,
+    ) {
+      if (
+        !model ||
+        vector.length !== 768 ||
+        vector.some((value) => !Number.isFinite(value)) ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 20
+      )
+        throw new StoreError('INVALID_INPUT');
+      const rows = db
+        .prepare(
+          `SELECT m.id,m.role,m.text,m.created_at AS createdAt,m.timezone,
+           c.title AS conversationTitle,e.vector FROM message_embeddings e
+           JOIN messages m ON m.id=e.message_id
+           JOIN conversations c ON c.id=m.conversation_id
+           WHERE c.owner_id=? AND e.model=? ORDER BY m.sequence DESC LIMIT 5000`,
+        )
+        .all(ownerId, model) as Array<IndexedMemory & { vector: Buffer }>;
+      const queryNorm = Math.hypot(...vector) || 1;
+      return rows
+        .filter((row) => row.id !== excludeMessageId && row.vector.length === 768 * 4)
+        .map((row) => {
+          let dot = 0;
+          let norm = 0;
+          for (let index = 0; index < 768; index++) {
+            const value = row.vector.readFloatLE(index * 4);
+            dot += vector[index]! * value;
+            norm += value * value;
+          }
+          const { vector: _stored, ...record } = row;
+          return { record, score: dot / (queryNorm * Math.sqrt(norm || 1)) };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((item) => item.record);
     },
     datedMemory(ownerId: string, from: number, to: number) {
       return db
@@ -253,6 +376,39 @@ export function createStore(path: string, now = Date.now()) {
         conversationTitle: string;
       }>;
     },
+    searchMessages(ownerId: string, query: string, conversationId: string | null) {
+      if (conversationId) owned(ownerId, conversationId);
+      const words = query.match(/[\p{L}\p{N}]{2,}/gu)?.slice(0, 8) ?? [];
+      if (!words.length) return { conversations: [], messages: [] };
+      const titleRows = conversationId
+        ? []
+        : (db
+            .prepare(
+              `SELECT id,title,updated_at AS updatedAt FROM conversations
+         WHERE owner_id=? AND instr(lower(title),lower(?))>0
+         ORDER BY updated_at DESC LIMIT 8`,
+            )
+            .all(ownerId, query) as Array<{ id: string; title: string; updatedAt: number }>);
+      const safe = words.map((word) => `"${word}"`).join(' OR ');
+      const messages = db
+        .prepare(
+          `SELECT m.id AS messageId,c.id AS conversationId,c.title AS conversationTitle,
+          m.role,substr(m.text,1,260) AS preview,m.created_at AS createdAt
+         FROM message_search s JOIN messages m ON m.sequence=s.rowid
+         JOIN conversations c ON c.id=m.conversation_id
+         WHERE c.owner_id=? AND message_search MATCH ? ${conversationId ? 'AND c.id=?' : ''}
+         ORDER BY bm25(message_search),m.created_at DESC LIMIT 40`,
+        )
+        .all(ownerId, safe, ...(conversationId ? [conversationId] : [])) as Array<{
+        messageId: string;
+        conversationId: string;
+        conversationTitle: string;
+        role: Message['role'];
+        preview: string;
+        createdAt: number;
+      }>;
+      return { conversations: titleRows, messages };
+    },
     deleteConversation(ownerId: string, conversationId: string) {
       owned(ownerId, conversationId);
       db.prepare('DELETE FROM conversations WHERE id=? AND owner_id=?').run(
@@ -270,6 +426,51 @@ export function createStore(path: string, now = Date.now()) {
       at: number,
     ) {
       return db.transaction(() => insertTurn(ownerId, conversationId, input, at)).immediate();
+    },
+    editMessage(
+      ownerId: string,
+      conversationId: string,
+      messageId: string,
+      input: { requestId: string; text: string; timezone: string },
+      at: number,
+    ) {
+      return db
+        .transaction(() => {
+          const conversation = owned(ownerId, conversationId);
+          const valid = submitMessageSchema.parse(input);
+          const target = db
+            .prepare(
+              "SELECT sequence FROM messages WHERE id=? AND conversation_id=? AND role='user'",
+            )
+            .get(messageId, conversationId) as { sequence: number } | undefined;
+          if (!target) throw new StoreError('NOT_FOUND');
+          if (
+            db
+              .prepare(
+                "SELECT 1 FROM turns WHERE conversation_id=? AND state IN ('pending','running')",
+              )
+              .get(conversationId)
+          )
+            throw new StoreError('CONVERSATION_BUSY');
+          const removedTitles = db
+            .prepare(
+              "SELECT text FROM messages WHERE conversation_id=? AND sequence>=? AND role='user'",
+            )
+            .all(conversationId, target.sequence) as Array<{ text: string }>;
+          // Replacing a question invalidates every answer and follow-up after it.
+          db.prepare('DELETE FROM messages WHERE conversation_id=? AND sequence>=?').run(
+            conversationId,
+            target.sequence,
+          );
+          if (removedTitles.some((item) => suggestedTitle(item.text) === conversation.title)) {
+            db.prepare('UPDATE conversations SET title=? WHERE id=?').run(
+              suggestedTitle(valid.text) ?? 'New conversation',
+              conversationId,
+            );
+          }
+          return insertTurn(ownerId, conversationId, valid, at);
+        })
+        .immediate();
     },
     turn,
     latestTurn(ownerId: string, conversationId: string) {
@@ -294,6 +495,32 @@ export function createStore(path: string, now = Date.now()) {
         )
         .all(turnId) as Array<{
         id: string;
+        title: string;
+        url: string;
+        excerpt: string;
+        published: string | null;
+        observedAt: string;
+      }>;
+    },
+    historicalSources(ownerId: string, messageIds: string[]) {
+      if (
+        messageIds.length > 40 ||
+        messageIds.some((id) => typeof id !== 'string' || id.length > 80)
+      )
+        throw new StoreError('INVALID_INPUT');
+      if (!messageIds.length) return [];
+      return db
+        .prepare(
+          `SELECT t.assistant_message_id AS messageId,s.source_id AS sourceId,s.title,s.url,
+          s.excerpt,s.published_at AS published,s.observed_at AS observedAt
+         FROM turn_sources s JOIN turns t ON t.id=s.turn_id
+         JOIN conversations c ON c.id=t.conversation_id
+         WHERE c.owner_id=? AND t.assistant_message_id IN (${messageIds.map(() => '?').join(',')})
+         ORDER BY t.created_at DESC,s.rowid LIMIT 60`,
+        )
+        .all(ownerId, ...messageIds) as Array<{
+        messageId: string;
+        sourceId: string;
         title: string;
         url: string;
         excerpt: string;
@@ -339,7 +566,7 @@ export function createStore(path: string, now = Date.now()) {
             .get(row.userMessageId) as { timezone: string };
           const messageId = addMessage(conversationId, 'assistant', text, original.timezone, at);
           const insertSource = db.prepare('INSERT INTO turn_sources VALUES(?,?,?,?,?,?,?)');
-          for (const source of sources.slice(0, 10))
+          for (const source of sources.slice(0, 60))
             insertSource.run(
               turnId,
               source.id,

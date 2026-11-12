@@ -15,6 +15,12 @@ const event = (text: string, finish = false) =>
   encoder.encode(
     `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] }, ...(finish ? { finishReason: 'STOP' } : {}) }] })}\n\n`,
   );
+const routeResponse = Response.json({
+  candidates: [
+    { content: { parts: [{ text: '{"scope":"THREAD","needsClock":false,"clockZones":[]}' }] } },
+  ],
+});
+const isRouter = (init: RequestInit) => !JSON.parse(String(init.body)).tools;
 function api(path: string, body?: unknown, session = cookie, stream = false, signal?: AbortSignal) {
   return realFetch(origin + '/api' + path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -61,16 +67,17 @@ afterEach(async () => {
 });
 it('streams over HTTP before completion, then persists and replays an idempotent final answer', async () => {
   let source!: ReadableStreamDefaultController<Uint8Array>;
-  const provider = vi.fn(
-    async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(c) {
-            source = c;
-            c.enqueue(event('Hello '));
-          },
-        }),
-      ),
+  const provider = vi.fn(async (_url: string, init: RequestInit) =>
+    isRouter(init)
+      ? routeResponse.clone()
+      : new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              source = c;
+              c.enqueue(event('Hello '));
+            },
+          }),
+        ),
   );
   vi.stubGlobal('fetch', provider);
   const input = { requestId: randomUUID(), text: 'Hello', timezone: 'UTC' };
@@ -95,13 +102,14 @@ it('streams over HTTP before completion, then persists and replays an idempotent
   expect(await (await api(`/conversations/${conversation}/messages`, input)).json()).toMatchObject({
     state: 'completed',
   });
-  expect(provider).toHaveBeenCalledTimes(1);
+  expect(provider).toHaveBeenCalledTimes(2);
 });
 it('authorizes cancellation, aborts the provider, and retries without duplicating the question', async () => {
   let providerSignal!: AbortSignal;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init: RequestInit) => {
+      if (isRouter(init)) return routeResponse.clone();
       providerSignal = init.signal as AbortSignal;
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -140,7 +148,9 @@ it('authorizes cancellation, aborts the provider, and retries without duplicatin
   expect(providerSignal.aborted).toBe(true);
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(event('Complete.', true))),
+    vi.fn(async (_url: string, init: RequestInit) =>
+      isRouter(init) ? routeResponse.clone() : new Response(event('Complete.', true)),
+    ),
   );
   const retried = await api(
     `/conversations/${conversation}/turns/${turn.id}/retry`,
@@ -159,6 +169,7 @@ it('cancels on client disconnect without storing partial output', async () => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_url: string, init: RequestInit) => {
+      if (isRouter(init)) return routeResponse.clone();
       providerSignal = init.signal as AbortSignal;
       return new Response(
         new ReadableStream<Uint8Array>({

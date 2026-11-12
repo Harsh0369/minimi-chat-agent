@@ -1,10 +1,19 @@
 import { readLines, streamEventSchema, type StreamEvent } from '../../shared/stream.js';
+export type Source = {
+  id: string;
+  title: string;
+  url: string;
+  excerpt: string;
+  published: string | null;
+  observedAt: string;
+};
 export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: number;
   sequence?: number;
+  sources?: Source[];
 };
 export type Conversation = { id: string; title: string; updatedAt: number };
 export type Turn = { id: string; state: string };

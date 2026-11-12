@@ -54,7 +54,7 @@ export async function webSearch(
       id: `S${index + 1}`,
       title: item.title.slice(0, 180),
       url: item.url,
-      excerpt: item.content.slice(0, 1600),
+      excerpt: item.content.slice(0, 800),
       published: item.published_date ?? null,
       observedAt: new Date().toISOString(),
     }));

@@ -112,6 +112,15 @@ export function useConversations(enabled: boolean) {
   };
   const run = async (id: string, path: string, body: unknown) => {
     const controller = new AbortController();
+    let paintFrame: number | null = null;
+    let bufferedText = '';
+    const flushText = () => {
+      paintFrame = null;
+      const next = bufferedText;
+      bufferedText = '';
+      if (next && selection.current === id && running.current === controller)
+        setPartial((text) => text + next);
+    };
     running.current = controller;
     setBusy(true);
     setError(null);
@@ -122,14 +131,25 @@ export function useConversations(enabled: boolean) {
     try {
       await streamTurn(path, body, controller.signal, (event) => {
         if (!current()) return;
-        if (event.type === 'delta') setPartial((text) => text + event.text);
-        if (event.type === 'reset') setPartial('');
+        if (event.type === 'delta') {
+          bufferedText += event.text;
+          if (paintFrame === null) paintFrame = requestAnimationFrame(flushText);
+        }
+        if (event.type === 'reset') {
+          if (paintFrame !== null) cancelAnimationFrame(paintFrame);
+          paintFrame = null;
+          bufferedText = '';
+          setPartial('');
+        }
         if (event.type === 'status') setProgress(event.message);
       });
     } catch (cause) {
       if (current() && !controller.signal.aborted)
         setError(cause instanceof Error ? cause.message : 'The answer failed.');
     } finally {
+      if (paintFrame !== null) cancelAnimationFrame(paintFrame);
+      paintFrame = null;
+      bufferedText = '';
       if (current()) {
         try {
           const [items, turn] = await Promise.all([
@@ -167,6 +187,19 @@ export function useConversations(enabled: boolean) {
     });
     setLoading(false);
   };
+  const edit = async (messageId: string, text: string) => {
+    const id = selection.current;
+    if (!id || running.current || loading) return;
+    setMessages((items) => {
+      const index = items.findIndex((item) => item.id === messageId && item.role === 'user');
+      return index < 0 ? items : [...items.slice(0, index), { ...items[index]!, text }];
+    });
+    await run(id, `/api/conversations/${id}/messages/${messageId}/edit`, {
+      requestId: crypto.randomUUID(),
+      text,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    });
+  };
   const retry = async () => {
     if (selected && failedTurn && !running.current)
       await run(selected, `/api/conversations/${selected}/turns/${failedTurn}/retry`, {
@@ -201,6 +234,7 @@ export function useConversations(enabled: boolean) {
     create,
     remove,
     send,
+    edit,
     retry,
     cancel,
   };

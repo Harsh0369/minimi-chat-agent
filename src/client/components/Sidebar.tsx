@@ -1,4 +1,4 @@
-import { MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { MessageSquare, Plus, Search, Trash2 } from 'lucide-react';
 import { Brand } from './Brand.js';
 
 export function Sidebar({
@@ -7,6 +7,7 @@ export function Sidebar({
   onSelect,
   onCreate,
   onDelete,
+  onSearch,
   enabled,
 }: {
   enabled: boolean;
@@ -15,6 +16,7 @@ export function Sidebar({
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
+  onSearch: () => void;
 }) {
   return (
     <aside
@@ -28,6 +30,12 @@ export function Sidebar({
         className="mt-7 flex shrink-0 min-h-11 w-full items-center gap-2 rounded-xl bg-ink px-4 text-sm font-medium text-white"
       >
         <Plus size={17} /> New conversation
+      </button>
+      <button
+        onClick={onSearch}
+        className="mt-3 flex min-h-10 items-center gap-2 rounded-lg px-3 text-left text-sm text-muted hover:bg-paper"
+      >
+        <Search size={16} /> Search chats <kbd className="ml-auto text-[10px]">Ctrl K</kbd>
       </button>
       <nav
         aria-label="Conversations"

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 
 export function migrate(db: Database.Database) {
   const version = db.pragma('user_version', { simple: true }) as number;
-  if (version > 3) throw new Error('Unsupported database version');
+  if (version > 4) throw new Error('Unsupported database version');
   if (version === 0)
     db.transaction(() => {
       db.exec(`
@@ -68,6 +68,18 @@ export function migrate(db: Database.Database) {
           PRIMARY KEY(turn_id,source_id)
         ) STRICT;
         PRAGMA user_version = 3;
+      `);
+    }).immediate();
+  if (version < 4)
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE message_embeddings (
+          message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          model TEXT NOT NULL, vector BLOB NOT NULL,
+          PRIMARY KEY(message_id,model)
+        ) STRICT;
+        CREATE INDEX message_embeddings_model ON message_embeddings(model);
+        PRAGMA user_version = 4;
       `);
     }).immediate();
 }

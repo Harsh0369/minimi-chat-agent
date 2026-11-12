@@ -33,6 +33,23 @@ describe('live HTTP turn with mocked providers', () => {
       const url = String(input);
       if (url.startsWith(origin)) return realFetch(input, init);
       if (url.includes('generativelanguage')) {
+        const body = JSON.parse(String(init?.body)) as { tools?: unknown };
+        if (String(init?.body).includes('You are an evidence auditor'))
+          return Response.json({
+            candidates: [
+              { content: { parts: [{ text: '{"answer":"Acme publishes its price [S1]."}' }] } },
+            ],
+          });
+        if (!body.tools)
+          return Response.json({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: '{"scope":"THREAD","needsClock":false,"clockZones":[]}' }],
+                },
+              },
+            ],
+          });
         modelCalls++;
         return Response.json({
           candidates: [
@@ -96,7 +113,10 @@ describe('live HTTP turn with mocked providers', () => {
         await api(`/conversations/${conversation.id}/messages`, 'GET', cookie)
       ).json()) as { items: Array<{ text: string }> };
       expect(messages.items).toHaveLength(2);
-      expect(messages.items[1]?.text).toContain('https://example.com/pricing');
+      expect(messages.items[1]?.text).toBe('Acme publishes its price [S1].');
+      expect((messages.items[1] as { sources?: Array<{ url: string }> })?.sources?.[0]?.url).toBe(
+        'https://example.com/pricing',
+      );
       const sources = (await (
         await api(`/conversations/${conversation.id}/turns/${turn.id}/sources`, 'GET', cookie)
       ).json()) as Array<{ url: string; excerpt: string }>;

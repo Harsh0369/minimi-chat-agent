@@ -28,6 +28,95 @@ afterEach(async () => {
 });
 
 describe('durable conversation store', () => {
+  it('replaces an edited question and removes dependent turns, sources, and search history', async () => {
+    const a = await owner('editor'),
+      b = await owner('other-editor');
+    const c = await db.call('createConversation', a, 'New conversation', time);
+    const first = await db.call('beginTurn', a, c.id, input('Original topic'), time);
+    await db.call('startTurn', a, c.id, first.id, time);
+    await db.call('completeTurn', a, c.id, first.id, 'Original answer', time + 1);
+    const second = await db.call('beginTurn', a, c.id, input('Old follow-up'), time + 2);
+    await db.call('startTurn', a, c.id, second.id, time + 2);
+    await db.call('completeTurn', a, c.id, second.id, 'Follow-up answer', time + 3);
+    await expect(
+      db.call('editMessage', b, c.id, first.userMessageId, input('New topic'), time + 4),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const replacement = await db.call(
+      'editMessage',
+      a,
+      c.id,
+      first.userMessageId,
+      input('New topic'),
+      time + 4,
+    );
+    expect(replacement.state).toBe('pending');
+    expect((await db.call('messages', a, c.id, 0, 100)).items.map((item) => item.text)).toEqual([
+      'New topic',
+    ]);
+    expect(await db.call('searchMemory', a, 'Original')).toEqual([]);
+    expect((await db.call('conversation', a, c.id)).title).toBe('New topic');
+    await expect(db.call('turn', a, c.id, first.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(db.call('turn', a, c.id, second.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      db.call('editMessage', a, c.id, replacement.userMessageId, input('Again'), time + 5),
+    ).rejects.toMatchObject({ code: 'CONVERSATION_BUSY' });
+  });
+  it('upgrades a version 3 database with the embedding table', async () => {
+    await db.close();
+    const previous = new Database(path);
+    try {
+      previous.exec('DROP TABLE message_embeddings');
+      previous.pragma('user_version = 3');
+    } finally {
+      previous.close();
+    }
+    db = await openDatabase(path, { now: time });
+    expect(await db.call('pendingEmbeddingTexts', await owner('migrated'), 'model', 1)).toEqual([]);
+    await db.close();
+    const inspect = new Database(path, { readonly: true });
+    try {
+      expect(inspect.pragma('user_version', { simple: true })).toBe(4);
+      expect(
+        inspect.prepare("SELECT name FROM sqlite_master WHERE name='message_embeddings'").get(),
+      ).toEqual({ name: 'message_embeddings' });
+    } finally {
+      inspect.close();
+    }
+    db = await openDatabase(path, { now: time });
+  });
+  it('titles after a meaningful question and searches messages only within the owner and chosen chat', async () => {
+    const a = await owner(),
+      b = await owner('search-other');
+    const first = await db.call('createConversation', a, 'New conversation', time);
+    await db.call('beginTurn', a, first.id, input('hi'), time);
+    expect((await db.call('conversation', a, first.id)).title).toBe('New conversation');
+    // A greeting turn may be pending; cancel it before the next user message.
+    const greeting = await db.call('latestTurn', a, first.id);
+    await db.call('stopTurn', a, first.id, greeting!.id, 'cancelled', time);
+    await db.call(
+      'beginTurn',
+      a,
+      first.id,
+      input('What is the gold price in India today?'),
+      time + 1,
+    );
+    expect((await db.call('conversation', a, first.id)).title).toBe('Gold price in India today');
+    const second = await db.call('createConversation', a, 'Silver prices', time + 2);
+    await db.call('beginTurn', a, second.id, input('Compare silver and gold'), time + 2);
+    const foreign = await db.call('createConversation', b, 'Private gold', time + 3);
+    await db.call('beginTurn', b, foreign.id, input('Private gold plans'), time + 3);
+    const all = await db.call('searchMessages', a, 'gold', null);
+    expect(all.messages.map((row) => row.conversationId).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+    expect(all.conversations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: first.id })]),
+    );
+    expect((await db.call('searchMessages', a, 'gold', first.id)).messages).toHaveLength(1);
+    await expect(db.call('searchMessages', b, 'gold', first.id)).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
   it('retrieves dated and lexical memory only for its owner', async () => {
     const a = await owner(),
       b = await owner('other');
@@ -45,6 +134,45 @@ describe('durable conversation store', () => {
     );
     await db.call('deleteConversation', a, c.id);
     expect(await db.call('searchMemory', a, 'Acme CRM')).toEqual([]);
+  });
+  it('persists owner-scoped semantic vectors and deletes them with conversations', async () => {
+    const a = await owner('vectors-a');
+    const b = await owner('vectors-b');
+    const conversation = await db.call('createConversation', a, 'Old work', time);
+    const foreign = await db.call('createConversation', b, 'Private work', time);
+    const first = await db.call('beginTurn', a, conversation.id, input('Hosting decision'), time);
+    const other = await db.call('beginTurn', b, foreign.id, input('Private topic'), time);
+    const vector = [1, ...Array<number>(767).fill(0)];
+    expect(await db.call('pendingEmbeddingTexts', a, 'gemini-embedding-001', 40)).toMatchObject([
+      { id: first.userMessageId },
+    ]);
+    await db.call('saveEmbeddings', a, 'gemini-embedding-001', [
+      { id: first.userMessageId, vector },
+    ]);
+    await db.call('saveEmbeddings', b, 'gemini-embedding-001', [
+      { id: other.userMessageId, vector },
+    ]);
+    expect(await db.call('pendingEmbeddingTexts', a, 'gemini-embedding-001', 40)).toEqual([]);
+    expect(
+      (await db.call('semanticMemory', a, 'gemini-embedding-001', vector, 8, 'none')).map(
+        (row) => row.id,
+      ),
+    ).toEqual([first.userMessageId]);
+    await expect(
+      db.call('saveEmbeddings', a, 'gemini-embedding-001', [{ id: other.userMessageId, vector }]),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await db.close();
+    db = await openDatabase(path, { now: time + 1 });
+    expect(
+      await db.call('semanticMemory', a, 'gemini-embedding-001', vector, 8, 'none'),
+    ).toHaveLength(1);
+    await db.call('deleteConversation', a, conversation.id);
+    expect(await db.call('semanticMemory', a, 'gemini-embedding-001', vector, 8, 'none')).toEqual(
+      [],
+    );
+    expect(
+      await db.call('semanticMemory', b, 'gemini-embedding-001', vector, 8, 'none'),
+    ).toHaveLength(1);
   });
   it('commits an answer and its cited source snapshot together', async () => {
     const a = await owner(),
@@ -72,6 +200,16 @@ describe('durable conversation store', () => {
         observedAt: '2026-11-11T12:00:00Z',
       },
     ]);
+    expect(
+      await db.call('historicalSources', a, [
+        (await db.call('turn', a, c.id, turn.id)).assistantMessageId!,
+      ]),
+    ).toMatchObject([{ sourceId: 'S1', url: 'https://example.com/pricing' }]);
+    expect(
+      await db.call('historicalSources', b, [
+        (await db.call('turn', a, c.id, turn.id)).assistantMessageId!,
+      ]),
+    ).toEqual([]);
     await expect(db.call('turnSources', b, c.id, turn.id)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });

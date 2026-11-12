@@ -7,7 +7,7 @@ import {
   SESSION_COOKIE,
   SESSION_LIFETIME_MS,
 } from '../sessions/service.js';
-import { AppError, publicError } from '../http/errors.js';
+import { publicError } from '../http/errors.js';
 import { openStream } from '../http/stream.js';
 import { createTurnService } from './turnService.js';
 import type { Logger } from '../logger.js';
@@ -91,6 +91,22 @@ export function createControllers(
       ),
     );
   };
+  const searchMessages: RequestHandler = async (req, res) => {
+    const query = z
+      .strictObject({
+        q: z.string().trim().min(2).max(100),
+        conversationId: z.uuid().optional(),
+      })
+      .parse(req.query);
+    res.json(
+      await store.call(
+        'searchMessages',
+        String(res.locals.ownerId),
+        query.q,
+        query.conversationId ?? null,
+      ),
+    );
+  };
   const getTurn: RequestHandler = async (req, res) => {
     res.json(
       await store.call(
@@ -142,12 +158,6 @@ export function createControllers(
   const submitMessage: RequestHandler = async (req, res) => {
     const ownerId = String(res.locals.ownerId),
       conversationId = id.parse(req.params.id);
-    if (!config?.geminiApiKey || !config.tavilyApiKey)
-      throw new AppError(
-        503,
-        'PROVIDER_NOT_CONFIGURED',
-        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
-      );
     const input = submitMessageSchema.parse(req.body);
     const release = turns.reserve();
     try {
@@ -161,13 +171,27 @@ export function createControllers(
       release();
     }
   };
-  const retryTurn: RequestHandler = async (req, res) => {
-    if (!config?.geminiApiKey || !config.tavilyApiKey)
-      throw new AppError(
-        503,
-        'PROVIDER_NOT_CONFIGURED',
-        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
+  const editMessage: RequestHandler = async (req, res) => {
+    const ownerId = String(res.locals.ownerId),
+      conversationId = id.parse(req.params.id),
+      messageId = id.parse(req.params.messageId);
+    const input = submitMessageSchema.parse(req.body);
+    const release = turns.reserve();
+    try {
+      const replacement = await store.call(
+        'editMessage',
+        ownerId,
+        conversationId,
+        messageId,
+        input,
+        clock(),
       );
+      await respond(req, res, ownerId, conversationId, replacement, input);
+    } finally {
+      release();
+    }
+  };
+  const retryTurn: RequestHandler = async (req, res) => {
     const ownerId = String(res.locals.ownerId),
       conversationId = id.parse(req.params.id),
       turnId = id.parse(req.params.turnId);
@@ -245,11 +269,13 @@ export function createControllers(
     getConversation,
     deleteConversation,
     listMessages,
+    searchMessages,
     getTurn,
     latestTurn,
     turnSources,
     cancelTurn,
     submitMessage,
+    editMessage,
     retryTurn,
     deleteHistory,
   };

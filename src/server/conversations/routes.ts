@@ -17,7 +17,8 @@ export function persistenceRouter(
   router.post('/session', handlers.establishSession);
   router.get('/session', handlers.getSession);
   router.delete('/session', handlers.revokeSession);
-  router.use(['/conversations', '/history'], handlers.requireSession);
+  router.use(['/conversations', '/history', '/search'], handlers.requireSession);
+  router.get('/search', handlers.searchMessages);
   router.post('/conversations', handlers.createConversation);
   router.get('/conversations', handlers.listConversations);
   router.get('/conversations/:id', handlers.getConversation);
@@ -28,6 +29,7 @@ export function persistenceRouter(
   router.get('/conversations/:id/turns/:turnId/sources', handlers.turnSources);
   router.post('/conversations/:id/turns/:turnId/cancel', handlers.cancelTurn);
   router.post('/conversations/:id/messages', limitTurns, handlers.submitMessage);
+  router.post('/conversations/:id/messages/:messageId/edit', limitTurns, handlers.editMessage);
   router.post('/conversations/:id/turns/:turnId/retry', limitTurns, handlers.retryTurn);
   router.delete('/history', handlers.deleteHistory);
   return router;

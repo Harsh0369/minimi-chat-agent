@@ -1,21 +1,19 @@
 import type { StorePort } from '../storage/client.js';
-import type { Config } from '../config.js';
+import { missingProviderSettings, type Config } from '../config.js';
 import type { Turn } from '../storage/store.js';
 import type { EmitEvent } from '../../shared/stream.js';
 import { AppError } from '../http/errors.js';
 import { answer } from '../agent/service.js';
+import { indexPendingMemory } from '../agent/semantic.js';
 
 export function createTurnService(store: StorePort, clock: () => number, config?: Config) {
   const active = new Map<string, AbortController>();
+  const indexing = new Set<string>();
   let admitted = 0;
   function reserve() {
     requireProviders();
-    if (admitted >= 3)
-      throw new AppError(
-        429,
-        'AGENT_BUSY',
-        'Three answers are already in progress. Retry shortly.',
-      );
+    if (admitted >= (config?.modelProvider === 'groq' ? 1 : 3))
+      throw new AppError(429, 'AGENT_BUSY', 'Answers are already in progress. Retry shortly.');
     admitted++;
     return () => {
       admitted--;
@@ -29,12 +27,7 @@ export function createTurnService(store: StorePort, clock: () => number, config?
     emit?: EmitEvent,
     disconnected?: AbortSignal,
   ) {
-    if (!config?.geminiApiKey || !config.tavilyApiKey)
-      throw new AppError(
-        503,
-        'PROVIDER_NOT_CONFIGURED',
-        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
-      );
+    requireProviders();
     const controller = new AbortController();
     active.set(turn.id, controller);
     const deadline = AbortSignal.timeout(45_000);
@@ -46,7 +39,7 @@ export function createTurnService(store: StorePort, clock: () => number, config?
     try {
       await store.call('startTurn', ownerId, conversationId, turn.id, clock());
       const result = await answer(
-        config,
+        config!,
         store,
         ownerId,
         conversationId,
@@ -58,20 +51,31 @@ export function createTurnService(store: StorePort, clock: () => number, config?
         emit,
       );
       signal.throwIfAborted();
-      const sources = result.citations.length
-        ? '\n\nSources:\n' +
-          result.citations.map((item) => `[${item.id}] ${item.title} — ${item.url}`).join('\n')
-        : '';
-      return await store.call(
+      const completed = await store.call(
         'completeTurn',
         ownerId,
         conversationId,
         turn.id,
-        result.text + sources,
+        result.text,
         clock(),
         result.citations,
       );
-    } catch {
+      const embeddingModel = config?.embeddingModel;
+      const embeddingKey = config?.geminiApiKey;
+      if (embeddingModel && embeddingKey && !indexing.has(ownerId)) {
+        indexing.add(ownerId);
+        void indexPendingMemory(
+          embeddingKey,
+          embeddingModel,
+          store,
+          ownerId,
+          AbortSignal.timeout(8_000),
+        )
+          .catch(() => {})
+          .finally(() => indexing.delete(ownerId));
+      }
+      return completed;
+    } catch (error) {
       try {
         await store.call(
           'stopTurn',
@@ -84,22 +88,29 @@ export function createTurnService(store: StorePort, clock: () => number, config?
       } catch {
         /* Already cancelled. */
       }
+      const rateLimited =
+        typeof error === 'object' && error !== null && 'status' in error && error.status === 429;
       throw new AppError(
-        deadline.aborted ? 504 : signal.aborted ? 409 : 502,
-        deadline.aborted ? 'AGENT_TIMEOUT' : signal.aborted ? 'AGENT_CANCELLED' : 'AGENT_FAILED',
-        'The answer could not be completed. You can retry.',
+        deadline.aborted ? 504 : signal.aborted ? 409 : rateLimited ? 429 : 502,
+        deadline.aborted
+          ? 'AGENT_TIMEOUT'
+          : signal.aborted
+            ? 'AGENT_CANCELLED'
+            : rateLimited
+              ? 'MODEL_RATE_LIMITED'
+              : 'AGENT_FAILED',
+        rateLimited
+          ? 'The model provider is rate limited. Retry shortly.'
+          : 'The answer could not be completed. You can retry.',
       );
     } finally {
       active.delete(turn.id);
     }
   }
   function requireProviders() {
-    if (!config?.geminiApiKey || !config.tavilyApiKey)
-      throw new AppError(
-        503,
-        'PROVIDER_NOT_CONFIGURED',
-        'Set GEMINI_API_KEY and TAVILY_API_KEY in .env.',
-      );
+    const missing = config ? missingProviderSettings(config) : ['MODEL_PROVIDER'];
+    if (missing.length)
+      throw new AppError(503, 'PROVIDER_NOT_CONFIGURED', `Set ${missing.join(', ')} in .env.`);
   }
   return {
     reserve,

@@ -1,16 +1,33 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { MobileDrawer } from './components/MobileDrawer.js';
 import { SiteHeader } from './components/SiteHeader.js';
 import { Sidebar } from './components/Sidebar.js';
 import { PreviewConversation } from './components/PreviewConversation.js';
 import { StatusNotice } from './components/StatusNotice.js';
+import { SearchDialog } from './components/SearchDialog.js';
 
 import { useServiceStatus } from './hooks/useServiceStatus.js';
 import { useConversations } from './hooks/useConversations.js';
 
 export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [focusedMessageId, setFocusedMessageId] = useState<string | null>(null);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const openSearch = useCallback(() => {
+    setMenuOpen(false);
+    setSearchOpen(true);
+  }, []);
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openSearch();
+      }
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [openSearch]);
   const { connection, retry, reset } = useServiceStatus();
   const chats = useConversations(
     connection.state === 'ready' && connection.status.stage === 'agent',
@@ -24,6 +41,7 @@ export function App() {
       selected={chats.selected}
       onSelect={(id) => {
         chats.setSelected(id);
+        setFocusedMessageId(null);
         closeMenu();
       }}
       onCreate={() => {
@@ -31,6 +49,7 @@ export function App() {
         closeMenu();
       }}
       onDelete={(id) => void chats.remove(id)}
+      onSearch={openSearch}
     />
   );
   return (
@@ -45,6 +64,15 @@ export function App() {
       <MobileDrawer open={menuOpen} onClose={closeMenu}>
         {sidebar}
       </MobileDrawer>
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        conversationId={chats.selected}
+        onResult={(id, messageId) => {
+          chats.setSelected(id);
+          setFocusedMessageId(messageId ?? null);
+        }}
+      />
       <div className="flex h-dvh min-h-0 min-w-0 flex-col">
         <SiteHeader
           title={
@@ -53,6 +81,7 @@ export function App() {
           }
           onMenu={() => setMenuOpen(true)}
           menuOpen={menuOpen}
+          onSearch={openSearch}
         />
         <main
           id="main"
@@ -64,8 +93,10 @@ export function App() {
             partial={chats.partial}
             progress={chats.progress}
             loading={chats.loading}
+            focusedMessageId={focusedMessageId}
             messages={chats.messages}
             onSend={chats.send}
+            onEdit={chats.edit}
             busy={chats.busy}
             enabled={enabled}
             onCancel={() => void chats.cancel()}

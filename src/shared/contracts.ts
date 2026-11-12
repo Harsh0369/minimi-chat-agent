@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
 // Client-safe contracts only. Never import server configuration from this module.
-export const missingSettingSchema = z.enum(['GEMINI_API_KEY', 'TAVILY_API_KEY']);
+export const missingSettingSchema = z.enum([
+  'GEMINI_API_KEY',
+  'OPENAI_API_KEY',
+  'GROQ_API_KEY',
+  'CHAT_MODEL',
+  'TAVILY_API_KEY',
+]);
 export type MissingSetting = z.infer<typeof missingSettingSchema>;
 
 export const serviceStatusSchema = z.strictObject({

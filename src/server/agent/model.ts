@@ -34,6 +34,7 @@ export async function generate(
   contents: ModelContent[],
   signal: AbortSignal,
   onText?: (text: string) => Promise<void>,
+  options?: { tools?: boolean; maxOutputTokens?: number; jsonSchema?: Record<string, unknown> },
 ) {
   const response = await fetchProvider(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:${onText ? 'streamGenerateContent?alt=sse' : 'generateContent'}`,
@@ -44,28 +45,40 @@ export async function generate(
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents,
-        tools: [
-          {
-            functionDeclarations: [
-              {
-                name: 'web_search',
-                description:
-                  'Search the current public web when a question needs fresh or verifiable external facts. Search only public information.',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    query: {
-                      type: 'string',
-                      description: 'A focused search query, maximum 250 characters',
+        tools:
+          options?.tools === false
+            ? undefined
+            : [
+                {
+                  functionDeclarations: [
+                    {
+                      name: 'web_search',
+                      description:
+                        'Search the current public web when a question needs fresh or verifiable external facts. Search only public information.',
+                      parameters: {
+                        type: 'object',
+                        properties: {
+                          query: {
+                            type: 'string',
+                            description: 'A focused search query, maximum 250 characters',
+                          },
+                        },
+                        required: ['query'],
+                      },
                     },
-                  },
-                  required: ['query'],
+                  ],
                 },
-              },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+              ],
+        generationConfig: {
+          temperature: options?.tools === false ? 0 : 0.2,
+          maxOutputTokens: options?.maxOutputTokens ?? 4096,
+          ...(options?.jsonSchema
+            ? {
+                responseMimeType: 'application/json',
+                responseJsonSchema: options.jsonSchema,
+              }
+            : {}),
+        },
       }),
     },
   );

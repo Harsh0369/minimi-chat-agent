@@ -15,9 +15,12 @@ const envSchema = z.object({
     .pipe(z.number().int().min(1).max(65535))
     .prefault('3000'),
   DATABASE_PATH: z.string().trim().min(1).default('./data/minimi.sqlite'),
+  MODEL_PROVIDER: z.enum(['gemini', 'openai', 'groq']).default('gemini'),
   GEMINI_API_KEY: optionalSetting,
+  OPENAI_API_KEY: optionalSetting,
+  GROQ_API_KEY: optionalSetting,
   TAVILY_API_KEY: optionalSetting,
-  CHAT_MODEL: z.string().trim().min(1).default('gemini-3.5-flash-lite'),
+  CHAT_MODEL: optionalSetting,
   EMBEDDING_MODEL: z.enum(['gemini-embedding-001']).optional(),
 });
 
@@ -42,9 +45,18 @@ export function readConfig(env: Record<string, string | undefined>) {
     host: value.HOST,
     port: value.PORT,
     databasePath: value.DATABASE_PATH,
+    modelProvider: value.MODEL_PROVIDER,
     geminiApiKey: value.GEMINI_API_KEY,
+    openaiApiKey: value.OPENAI_API_KEY,
+    groqApiKey: value.GROQ_API_KEY,
     tavilyApiKey: value.TAVILY_API_KEY,
-    chatModel: value.CHAT_MODEL,
+    chatModel:
+      value.CHAT_MODEL ??
+      (value.MODEL_PROVIDER === 'gemini'
+        ? 'gemini-3.5-flash-lite'
+        : value.MODEL_PROVIDER === 'groq'
+          ? 'openai/gpt-oss-120b'
+          : ''),
     embeddingModel: value.EMBEDDING_MODEL,
   });
 }
@@ -52,7 +64,10 @@ export type Config = ReturnType<typeof readConfig>;
 
 export function missingProviderSettings(config: Config): MissingSetting[] {
   const missing: MissingSetting[] = [];
-  if (!config.geminiApiKey) missing.push('GEMINI_API_KEY');
+  if (config.modelProvider === 'gemini' && !config.geminiApiKey) missing.push('GEMINI_API_KEY');
+  if (config.modelProvider === 'openai' && !config.openaiApiKey) missing.push('OPENAI_API_KEY');
+  if (config.modelProvider === 'groq' && !config.groqApiKey) missing.push('GROQ_API_KEY');
+  if (!config.chatModel) missing.push('CHAT_MODEL');
   if (!config.tavilyApiKey) missing.push('TAVILY_API_KEY');
   return missing;
 }

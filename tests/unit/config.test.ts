@@ -37,4 +37,28 @@ describe('configuration boundary', () => {
       expect(String(error)).not.toContain(secret);
     }
   });
+
+  it('requires only the selected model provider and Tavily', () => {
+    const groq = readConfig({
+      MODEL_PROVIDER: 'groq',
+      GROQ_API_KEY: 'fixture',
+      TAVILY_API_KEY: 'fixture',
+    });
+    expect(groq.chatModel).toBe('openai/gpt-oss-120b');
+    expect(missingProviderSettings(groq)).toEqual([]);
+    expect(
+      missingProviderSettings(
+        readConfig({
+          MODEL_PROVIDER: 'openai',
+          OPENAI_API_KEY: 'fixture',
+          TAVILY_API_KEY: 'fixture',
+        }),
+      ),
+    ).toEqual(['CHAT_MODEL']);
+    expect(
+      missingProviderSettings(
+        readConfig({ MODEL_PROVIDER: 'openai', CHAT_MODEL: 'fixture', TAVILY_API_KEY: 'fixture' }),
+      ),
+    ).toEqual(['OPENAI_API_KEY']);
+  });
 });
