@@ -15,7 +15,7 @@ npm run dev
 
 Open http://127.0.0.1:3000. On Windows PowerShell, copy the file with `Copy-Item .env.example .env`. Gemini defaults to `gemini-3.5-flash-lite`. To use OpenAI, set `MODEL_PROVIDER=openai`, `OPENAI_API_KEY`, and `CHAT_MODEL`. To use Groq, set `MODEL_PROVIDER=groq` and `GROQ_API_KEY`; its default model is `openai/gpt-oss-120b`. All providers also need `TAVILY_API_KEY`. Keys stay on the server. Without the selected keys, the app still opens and shows why chat is unavailable. The local SQLite file is created automatically in `./data`.
 
-Optional `EMBEDDING_MODEL=gemini-embedding-001` stores message vectors in the same SQLite database. Completed turns trigger bounded background indexing; recall searches indexed history without waiting for older-message backfill. This uses `GEMINI_API_KEY` even when Groq or OpenAI is the chat provider. Lexical and exact-date recall remain available if embedding fails. See [the live review](docs/LIVE_REVIEW.md) for observed provider results and remaining evaluation limits.
+Optional `EMBEDDING_MODEL=gemini-embedding-001` stores message vectors in the same SQLite database. Completed turns trigger bounded background indexing; recall searches indexed history without waiting for older-message backfill. This uses `GEMINI_API_KEY` even when Groq or OpenAI is the chat provider. Lexical and exact-date recall remain available if embedding fails.
 
 **Cost and privacy:** Gemini and Tavily free tiers are quota-limited and can change. The Gemini unpaid tier permits Google to use prompts and responses to improve products. Check your account's current limits and terms before entering sensitive chats. No billing account is required by this app.
 
@@ -31,11 +31,11 @@ Optional `EMBEDDING_MODEL=gemini-embedding-001` stores message vectors in the sa
 
 See [DESIGN.md](DESIGN.md) for the one-page explanation. Express routes compose middleware and controllers; a separate turn service owns execution, admission and cancellation. Shared HTTP errors, safe logging and streaming transport keep policy out of route wiring. A single worker serializes SQLite operations. `src/server/agent` contains time parsing, memory assembly, provider adapters and the LangGraph workflow; `src/client` contains the React UI. Gemini uses its native transport to preserve tool-call signatures; OpenAI and Groq use LangChain model integrations. The browser never receives provider keys.
 
-This is optimized for a **single local process**. Another browser profile or device has a different workspace. Date lookup supports one explicitly mentioned day. With embeddings disabled, vague paraphrases can be missed; with them enabled, background indexing and provider quotas limit immediate recall of very large histories. Source snippets, vendor-domain checks, cited amounts and dated-change checks reduce unsupported claims but cannot prove that a cited page supports every sentence. Groq has been tried live and remains optional because a searched answer fell back to “could not verify”; OpenAI has mocked tests but no live account evaluation. Historical price changes require comparable earlier evidence. See [the evaluation record](docs/EVALUATION.md) for observed passes and unresolved live limits.
+This is optimized for a **single local process**. Another browser profile or device has a different workspace. Date lookup supports one explicitly mentioned day. With embeddings disabled, vague paraphrases can be missed; with them enabled, background indexing and provider quotas limit immediate recall of very large histories. Source snippets, vendor-domain checks, cited amounts and dated-change checks reduce unsupported claims but cannot prove that a cited page supports every sentence. Gemini is the default; Groq is optional and can conservatively decline a searched answer when evidence review is inconclusive. The OpenAI adapter has mocked tests but no live account evaluation. Historical price changes require comparable earlier evidence.
 
 ## Verify
 
-See [the latency review](docs/LATENCY.md) for measured model and search timings. Set `PERF_LOG=1` to log durations and outcomes without prompts, queries, or keys.
+Set `PERF_LOG=1` to log timings and sanitized failure categories without prompts, queries, or keys.
 
 ```sh
 npm run check
@@ -45,5 +45,3 @@ npm run test:e2e
 ```
 
 For production browser tests, set `PLAYWRIGHT_SERVER_MODE=production` and run `npm run test:e2e` after building. `npm start` serves the production build. Browser tests do not call paid providers.
-
-The challenge requires a **public** repository and a short `DESIGN.md` for submission. This repo remains private until explicitly published. The application form also asks for a one-minute explanation video; that is a separate submission task.
