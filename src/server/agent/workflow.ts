@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { EmitEvent } from '../../shared/stream.js';
 import { generate, type ModelContent } from './model.js';
 import { webSearch, type SearchResult } from './search.js';
-import { selectSearchResults } from './contextBudget.js';
+import { rankSearchResults, selectSearchResults } from './contextBudget.js';
 import type { Config } from '../config.js';
 import { missingComparisonCoverage, type ComparisonCoverage } from './coverage.js';
 
@@ -86,7 +86,8 @@ export async function runAnswerWorkflow(
       const batches = await searchQueries(state.queries, searchKey, signal);
       const sources = [...state.sources];
       const responses = state.calls.map((call, index) => {
-        const numbered = selectSearchResults(batches[index]!.results, provider, false).map(
+        const ranked = rankSearchResults(batches[index]!.results, state.queries[index]!);
+        const numbered = selectSearchResults(ranked, provider, false, state.queries[index]!).map(
           (result) => {
             const next = { ...result, id: `S${sources.length + 1}` };
             sources.push(next);

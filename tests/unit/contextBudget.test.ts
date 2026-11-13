@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { packMemorySections, selectSearchResults } from '../../src/server/agent/contextBudget.js';
+import {
+  packMemorySections,
+  rankSearchResults,
+  selectSearchResults,
+} from '../../src/server/agent/contextBudget.js';
 
 const record = (id: string, text: string) => ({
   id,
@@ -49,5 +53,43 @@ describe('provider context budgets', () => {
     expect(selectSearchResults(sources, 'groq', false)).toHaveLength(3);
     expect(selectSearchResults(sources, 'groq', true)[0]?.excerpt).toHaveLength(260);
     expect(selectSearchResults(sources, 'gemini', true)).toHaveLength(5);
+  });
+
+  it('keeps a relevant primary source when a bounded provider receives summaries first', () => {
+    const sources = [
+      'https://example.net/blog/neon-pricing',
+      'https://reviews.example.org/neon',
+      'https://database-news.example/pricing',
+      'https://neon.com/docs/introduction/plans',
+      'https://another.example/neon',
+    ].map((url, index) => ({
+      id: `S${index + 1}`,
+      title: index === 3 ? 'Neon plans' : 'Neon pricing guide',
+      url,
+      excerpt: 'Launch is billed by usage.',
+      published: null,
+      observedAt: '2026-11-12T00:00:00Z',
+    }));
+    const ranked = rankSearchResults(sources, 'Neon Launch plan pricing');
+    expect(ranked[0]?.url).toBe('https://neon.com/docs/introduction/plans');
+    expect(selectSearchResults(ranked, 'groq', false)).toContainEqual(sources[3]);
+    expect(rankSearchResults(sources, 'unrelated question')).toEqual(sources);
+  });
+
+  it('keeps a requested plan price when it occurs after the leading snippet window', () => {
+    const source = {
+      id: 'S1',
+      title: 'Plan pricing',
+      url: 'https://vendor.example/pricing',
+      excerpt: `${'Compute usage explanation. '.repeat(15)}Launch plan: $0.106 per CU-hour.`,
+      published: null,
+      observedAt: '2026-11-12T00:00:00Z',
+    };
+    const selected = selectSearchResults([source], 'groq', false, 'Launch plan price');
+    expect(selected[0]?.excerpt).toContain('Launch plan: $0.106 per CU-hour');
+    expect(Buffer.byteLength(selected[0]!.excerpt)).toBeLessThanOrEqual(260);
+    expect(selectSearchResults([source], 'gemini', false, 'Launch plan price')[0]?.excerpt).toBe(
+      source.excerpt,
+    );
   });
 });

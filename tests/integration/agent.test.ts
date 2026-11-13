@@ -24,20 +24,97 @@ function routerReply(
 }
 function fixture() {
   const store = createStore(':memory:', now);
+  const operations: string[] = [];
   const port = {
     available: true,
     call: async (operation: keyof typeof store.operations, ...args: never[]) => {
+      operations.push(operation);
       const fn = store.operations[operation] as (...values: never[]) => unknown;
       return fn(...args);
     },
   } as StorePort;
   const owner = store.operations.createSession('hash', now, now + 10000).ownerId;
   const conversation = store.operations.createConversation(owner, 'New conversation', now);
-  return { store, port, owner, conversation };
+  return { store, port, owner, conversation, operations };
 }
 afterEach(() => vi.unstubAllGlobals());
 
 describe('agent execution', () => {
+  it('answers workspace recall without waiting for historical embedding backfill', async () => {
+    const f = fixture();
+    const other = f.store.operations.createConversation(f.owner, 'Database research', now);
+    f.store.operations.beginTurn(
+      f.owner,
+      other.id,
+      { requestId: randomUUID(), text: 'I prefer managed Postgres hosting.', timezone: 'UTC' },
+      now - 60_000,
+    );
+    const question = 'What did I discuss in another conversation?';
+    const turn = f.store.operations.beginTurn(
+      f.owner,
+      f.conversation.id,
+      { requestId: randomUUID(), text: question, timezone: 'UTC' },
+      now,
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, options: RequestInit) => {
+        if (String(input).includes('batchEmbedContents')) {
+          const request = JSON.parse(String(options.body)) as { requests: unknown[] };
+          return Response.json({
+            embeddings: request.requests.map(() => ({
+              values: [1, ...Array<number>(767).fill(0)],
+            })),
+          });
+        }
+        const routing = routerReply(options, 'WORKSPACE');
+        if (routing)
+          return Response.json({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        scope: 'WORKSPACE',
+                        needsClock: false,
+                        clockZones: [],
+                        webPolicy: 'FORBID',
+                        answerBasis: 'MEMORY',
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+        return Response.json({
+          candidates: [
+            { content: { parts: [{ text: 'You discussed managed Postgres hosting.' }] } },
+          ],
+        });
+      }),
+    );
+    const result = await answer(
+      readConfig({
+        GEMINI_API_KEY: 'fixture',
+        TAVILY_API_KEY: 'fixture',
+        EMBEDDING_MODEL: 'gemini-embedding-001',
+      }),
+      f.port,
+      f.owner,
+      f.conversation.id,
+      question,
+      turn.userMessageId,
+      'UTC',
+      now,
+      new AbortController().signal,
+    );
+    expect(result.text).toContain('managed Postgres');
+    expect(f.operations).toContain('semanticMemory');
+    expect(f.operations).not.toContain('pendingEmbeddingTexts');
+    f.store.close();
+  });
   it('keeps a date follow-up in its chat even when another chat discusses rice prices', async () => {
     const f = fixture();
     const first = f.store.operations.beginTurn(

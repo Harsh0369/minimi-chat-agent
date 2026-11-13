@@ -4,7 +4,7 @@ import { mentionedDay } from './time.js';
 import type { ModelContent, generate } from './model.js';
 import { z } from 'zod';
 import { webSearch, type SearchResult } from './search.js';
-import { embedQuery, indexPendingMemory, semanticRecall } from './semantic.js';
+import { embedQuery, semanticRecall } from './semantic.js';
 import type { EmitEvent } from '../../shared/stream.js';
 import { comparisonPlan, inferComparisonPlan } from './comparison.js';
 import { marketContext, marketSearchPlan } from './market.js';
@@ -12,7 +12,12 @@ import { locationClarification } from './location.js';
 import { clockFacts, needsContextRouting, routeContext, type ContextRoute } from './context.js';
 import { runAnswerWorkflow } from './workflow.js';
 import { createGenerate } from './providers.js';
-import { packMemorySections, selectSearchResults, type MemoryRecord } from './contextBudget.js';
+import {
+  packMemorySections,
+  rankSearchResults,
+  selectSearchResults,
+  type MemoryRecord,
+} from './contextBudget.js';
 import type { ComparisonCoverage } from './coverage.js';
 import {
   comparisonAnswer,
@@ -21,6 +26,7 @@ import {
   supportedAmounts,
 } from './comparisonAnswer.js';
 import { answerFromHistory } from './historyAnswer.js';
+import { alignLinkedCitations } from './citationLinks.js';
 import { log } from '../logger.js';
 
 const MAX_SEARCHES = 12;
@@ -131,13 +137,6 @@ export async function answer(
   if (config.embeddingModel && config.geminiApiKey && recall && !day) {
     try {
       const embeddingSignal = AbortSignal.any([signal, AbortSignal.timeout(6000)]);
-      await indexPendingMemory(
-        config.geminiApiKey,
-        config.embeddingModel,
-        store,
-        ownerId,
-        embeddingSignal,
-      );
       const queryVector = await embedQuery(
         config.geminiApiKey,
         config.embeddingModel,
@@ -231,6 +230,7 @@ export async function answer(
         ),
         config.modelProvider,
         true,
+        plan.queries[index]!,
       )
         .slice(0, 3)
         .map((result) => {
@@ -257,7 +257,12 @@ export async function answer(
   if (marketPlan && searches < MAX_SEARCHES) {
     await emit?.({ type: 'status', message: 'Checking your local market…' });
     const results = await webSearch(config.tavilyApiKey!, marketPlan.query, signal);
-    marketEvidence = selectSearchResults(results, config.modelProvider, true).map((result) => {
+    marketEvidence = selectSearchResults(
+      rankSearchResults(results, marketPlan.query),
+      config.modelProvider,
+      true,
+      marketPlan.query,
+    ).map((result) => {
       const numbered = { ...result, id: `S${sourceMap.size + 1}` };
       sourceMap.set(numbered.id, numbered);
       return numbered;
@@ -402,6 +407,7 @@ export async function answer(
   for (const source of result.sources) sourceMap.set(source.id, source);
   // Only source IDs actually returned by the search adapter can become clickable citations.
   const used = new Set<string>();
+  text = alignLinkedCitations(text, result.sources);
   text = text.replace(/\[(S\d+(?:\s*,\s*S\d+)+)\]/g, (_match: string, group: string) =>
     group
       .split(',')
